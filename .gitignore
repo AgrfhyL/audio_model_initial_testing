@@ -1,0 +1,36 @@
+# --- corpus data: never commit TIMIT (LDC93S1 is licensed, not redistributable) ---
+*.WAV
+*.wav
+*.PHN
+*.WRD
+*.SPH
+*.sph
+timit/
+TIMIT/
+data/
+
+# --- python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.python-version
+
+# --- jupyter ---
+.ipynb_checkpoints/
+*-checkpoint.ipynb
+
+# --- caches / artifacts ---
+.cache/
+.pytest_cache/
+.mypy_cache/
+figs/
+*.png
+*.pdf
+
+# --- macOS / editors ---
+.DS_Store
+.vscode/
+.idea/
