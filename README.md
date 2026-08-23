@@ -7,6 +7,14 @@ assumed.
 The utterance is `TRAIN/DR1/FCJF0/SA1` — *"She had your dark suit in greasy wash water all
 year."*
 
+## Notebooks
+
+| Notebook | What it does |
+|---|---|
+| `Init_Play.ipynb` | One TIMIT utterance through five self-supervised encoders (below) |
+| `Whisper_Play.ipynb` | Whisper `base` ASR + WER on a 10-utterance TIMIT sample, with audio playback |
+| `Offset_Play.ipynb` | Does *where* an utterance sits in Whisper's 30 s window change the transcript? |
+
 ## Models
 
 | # | Model | HF checkpoint |
@@ -102,3 +110,63 @@ The per-layer phone-separability curves (silhouette, linear probe) are included 
 demonstration and are deliberately labelled as unreliable**: one utterance gives 138 frames
 over 6 classes, which is far too little to reproduce published layer-wise trends. Scaling that
 up needs hundreds of utterances and speaker-disjoint splits.
+
+---
+
+# Where an utterance sits in Whisper's 30 s window
+
+`Offset_Play.ipynb`. Whisper always encodes a fixed 30 s input, so a 3 s utterance fills ~10% of
+the window and the rest is padding. This asks whether **position** inside the window changes the
+transcript, holding the audio bit-identical and moving only where it sits.
+
+1000 TIMIT `TEST` utterances (< 5 s, no `SA*`, 168 speakers, 482 distinct sentences) x 6 offsets
+(0, 5, 10, 15, 20, 25 s) x 2 arms (timestamp tokens on / off) = 12 000 decodes, ~22 min on MPS.
+
+Controls: fp32 throughout, greedy, `language="en"`, `task="transcribe"`, no prompt or prefix
+(the `whisper.decode()` equivalent of `condition_on_previous_text=False` with an empty
+`initial_prompt`), zero padding only, and Whisper's own `EnglishTextNormalizer` applied to both
+hypothesis and reference. WER is pooled corpus-level, not a mean of per-file rates.
+
+`whisper.decode()` is used rather than `model.transcribe()`: `transcribe()` wraps the decoder in
+a seek loop plus `no_speech_threshold` / `logprob_threshold` / `compression_ratio_threshold`, any
+of which can blank or re-roll a segment in an offset-dependent way - confounding the exact effect
+being measured.
+
+## Results
+
+| offset | WER (timestamps ON) | WER (timestamps OFF) |
+|--------:|-----:|-----:|
+| 0 s  | 0.0705 | 0.0810 |
+| 5 s  | 0.0970 | 0.0732 |
+| 10 s | 0.0962 | 0.0779 |
+| 15 s | 0.1129 | 0.0707 |
+| 20 s | 0.1547 | 0.0716 |
+| 25 s | **0.2981** | 0.0780 |
+
+- **With timestamps off, position is nearly irrelevant** - WER stays in 0.071-0.081 with no
+  trend. The encoder handles a late-placed utterance fine.
+- **With timestamps on, WER quadruples** from 0.070 to 0.298 across the window.
+- **But the median per-file WER is 0.0000 at every offset in both arms.** The corpus rise is
+  entirely tail-driven: at offset 25 s the top 1% of files carry 44% of all errors, and 612/1000
+  files are still transcribed perfectly. Position does not gradually degrade transcription - it
+  raises the probability of *catastrophic looping hallucination*. Files with runaway output
+  (>3x the reference length) go 0 -> 19 as the offset grows, and insertions go 114 -> 1451.
+- Example at 25 s: `DR6/MESD0/SI1632` ("Fuss, fuss, old man.") returns "I'm going to be a little
+  bit more careful." repeated until the token limit. The same file at offset 0 is exact.
+
+## Two things the controls caught
+
+- **The mel really is shift-invariant, but only away from the array edge.** Offsets 5-25 s give
+  *bit-identical* mel frames for all 1000 files (max deviation 0.000e+00), which is what makes
+  the comparison valid. Offset 0 does not: `torch.stft(center=True)` reflect-pads 200 samples, so
+  at offset 0 the padding mirrors the utterance's own opening instead of zeros, perturbing mel
+  frames 0-1. Offset 0 is still the canonical `pad_or_trim` condition and belongs in the plot -
+  it just is not a pure translation of the others.
+- **`max_initial_timestamp=1.0` is a confound in the timestamps-on arm.** Whisper forbids the
+  first timestamp token from exceeding 1.0 s, so an utterance at 25 s cannot open with
+  `<|25.00|>` - it is forced to `<|0.00|>` while the closing timestamp still tracks the true end.
+  Part of the ON curve is therefore a hard-coded decoding rule, not the model's acoustic response
+  to position. The stock value is kept (this is Whisper as shipped) and recorded as a control.
+
+Outputs (`offset_manifest.json`, `offset_results.csv`, the PNGs) are gitignored - the manifest
+and CSV embed TIMIT reference transcripts, which are licensed.
