@@ -4,20 +4,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A speech-research scratchpad: TIMIT audio pushed through self-supervised encoders and Whisper,
-one experiment per notebook. There is **no package, no test suite, no build step, and no shared
-Python module** — each notebook is deliberately self-contained and duplicates its own helpers.
-Do not refactor shared logic into a `.py` module unless asked; the redundancy is the design.
+**Objective: the positional dependence of Whisper's predictions** — whether *where* a short
+utterance sits inside the fixed 30 s input window changes what the model transcribes.
+
+A research scratchpad, one experiment per notebook. There is **no package, no test suite, no
+build step, and no shared Python module** — each notebook is deliberately self-contained and
+duplicates its own helpers. Do not refactor shared logic into a `.py` module unless asked; the
+redundancy is the design.
 
 | Notebook | Experiment |
 |---|---|
-| `Init_Play.ipynb` | One utterance through 5 SSL encoders (wav2vec2 / WavLM / WavLM+ / HuBERT / data2vec): sample↔frame alignment, layer probing |
-| `Whisper_Play.ipynb` | Whisper `base` ASR + WER on 10 TIMIT TRAIN utterances |
-| `Aug_23.ipynb` | Does utterance *position* in Whisper's 30 s window change the transcript? 1000 files × 6 offsets × 2 timestamp arms |
-| `Transcribe_Offset.ipynb` | Same clips re-run through `transcribe()`, in a greedy and a stock-fallback arm |
+| `Aug_23.ipynb` | The core experiment: does position change the transcript? 1000 files × 6 offsets × 2 timestamp arms, via `whisper.decode()` |
+| `Transcribe_Offset.ipynb` | Same clips through `transcribe()`, in a greedy and a stock-fallback arm |
+| `Colab_ModelScaling.ipynb` | Does the effect shrink with model size? tiny/base/small/medium on a Colab GPU (CUDA, fp16) |
 
-`README.md` still refers to the offset experiment as `Offset_Play.ipynb`; the file was renamed to
-`Aug_23.ipynb`. Same notebook.
+`archive/` holds **discontinued** work — `Init_Play.ipynb` (five SSL encoders) and
+`Whisper_Play.ipynb` (10-file Whisper WER warm-up). Neither is being continued; do not extend them
+or treat them as the current line of work. Both use absolute TIMIT paths so they still run in
+place. `Whisper_Play.ipynb`'s stored outputs embed TIMIT audio as base64 — it is already in git
+history, so removing it needs a history rewrite, not just a commit.
+
+Note the active notebooks read **bare relative paths** (`corpus_frozen/`, `offset_results.csv`,
+`offset_manifest.json`) and that data sits gitignored at the repo root. Moving those notebooks
+into a subdirectory breaks them unless the paths are rewritten.
 
 ## Running notebooks
 
@@ -55,8 +64,9 @@ start/end sample offsets and must be stripped: `f.read().strip().split(None, 2)[
 The TIMIT root is **hardcoded per notebook** and must be edited when the install moves:
 
 - `Aug_23.ipynb` → `TIMIT_TEST`
-- `Whisper_Play.ipynb` → `TIMIT_TRAIN`
-- `Init_Play.ipynb` → `UTT_STEM` (a single utterance stem, no extension)
+- `Colab_ModelScaling.ipynb` → `DRIVE_ROOT` (auto-locates `TEST/` beneath it)
+- `archive/Whisper_Play.ipynb` → `TIMIT_TRAIN`
+- `archive/Init_Play.ipynb` → `UTT_STEM` (a single utterance stem, no extension)
 
 `SA1`/`SA2` are the two shibboleth sentences recorded by *every* speaker; exclude them from any
 corpus-level metric or they dominate the score.
@@ -124,6 +134,23 @@ Empirically: with timestamps **off**, `transcribe()` greedy is bit-identical to 
 every offset (the seek loop never re-seeks without timestamp tokens). With timestamps **on**, the
 two diverge on exactly the files where the loop re-seeks. Results cache is
 `transcribe_results.csv`, keyed by `(path, offset_s, timestamps, fallback)`.
+
+## Model scaling on Colab
+
+`Colab_ModelScaling.ipynb` runs the offset experiment across model sizes. Three things differ from
+the local notebooks and matter:
+
+- **`n_mels` comes from `model.dims.n_mels`, never hardcoded 80.** `large-v3` and `turbo` use 128;
+  hardcoding mis-shapes the encoder input on those checkpoints.
+- **fp16 on CUDA**, so it will not reproduce the local fp32/MPS numbers exactly — `base` is in the
+  sweep as the anchor that keeps the sizes internally comparable. The mel stays fp32 on CPU
+  (`decode()` calls `mel.half()` itself), preserving the bit-identical-shift property.
+- **`corpus_digests.json`** (committed, root) carries paths + `sha256_audio` only, no transcript
+  text, ordered by the original draw. Colab rebuilds and verifies the corpus from a private TIMIT
+  copy rather than receiving licensed data.
+
+Subset size is not free: the effect is tail-driven, so 300 clips understate offset-25 WER by ~31%
+relative (0.2064 vs 0.2981). 700 tracks the full curve within 0.005.
 
 ## Frozen corpus
 
