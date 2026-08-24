@@ -16,16 +16,6 @@ year."*
 | `Aug_23.ipynb` | Does *where* an utterance sits in Whisper's 30 s window change the transcript? |
 | `Transcribe_Offset.ipynb` | The same experiment through `transcribe()` instead of `decode()` |
 
-## Models
-
-| # | Model | HF checkpoint |
-|---|-------|---------------|
-| A | wav2vec 2.0 base | `facebook/wav2vec2-base` |
-| B | WavLM base | `microsoft/wavlm-base` |
-| C | WavLM base+ | `microsoft/wavlm-base-plus` |
-| D | HuBERT base | `facebook/hubert-base-ls960` |
-| E | data2vec audio base | `facebook/data2vec-audio-base` |
-
 ## Structure
 
 `Init_Play.ipynb` is organised as **Section 0 (shared helpers) → model (A–E) → task (1/2/3) →
