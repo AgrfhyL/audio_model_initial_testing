@@ -44,10 +44,40 @@ Quote the corpus WER, and keep the corpus large enough to contain the tail.
 |---|---|
 | `Aug_23.ipynb` | Does position change the transcript? Isolates the effect with `whisper.decode()` — one encoder pass, one greedy decode, nothing else. |
 | `Transcribe_Offset.ipynb` | What does the full `transcribe()` pipeline add on top? Same clips, greedy and stock-fallback arms. |
-| `Colab_ModelScaling.ipynb` | Does the effect shrink with model size? `tiny`/`base`/`small`/`medium` on a Colab GPU. [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/AgrfhyL/audio_model_initial_testing/blob/main/Colab_ModelScaling.ipynb) |
+| `Colab_ModelScaling.ipynb` | Does the effect shrink with model size? `tiny`/`base`/`small`/`medium` on a Colab GPU — **run, see below**. [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/AgrfhyL/audio_model_initial_testing/blob/main/Colab_ModelScaling.ipynb) |
 
 Earlier, discontinued work lives in [`archive/`](archive/) — a five-encoder self-supervised
 probing study and a 10-file Whisper WER warm-up. Neither is being continued.
+
+## Does scale remove it? Partly.
+
+`tiny`/`base`/`small`/`medium` on 700 clips, Colab T4, fp16 (41 min). Ratio is WER at a 25 s
+offset over WER at 0 s — the positional penalty, normalised for each model's baseline accuracy:
+
+| model | params | 0 s | 5 s | 10 s | 15 s | 20 s | 25 s | **25s/0s** |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| tiny | 39M | 0.1025 | 0.1317 | 0.1957 | 0.7661 | 0.6604 | **1.4752** | **14.4×** |
+| base | 74M | 0.0686 | 0.0995 | 0.0942 | 0.1180 | 0.1532 | 0.2971 | 4.3× |
+| small | 244M | 0.0375 | 0.0370 | 0.0530 | 0.0549 | 0.0665 | 0.1352 | 3.6× |
+| medium | 769M | 0.0235 | 0.0247 | 0.0274 | 0.0315 | 0.0375 | 0.0526 | 2.2× |
+
+*(timestamps ON. With timestamps OFF every model is flat: ratios 1.07, 0.89, 1.01, 0.98.)*
+
+- **The penalty shrinks monotonically with scale — 14.4× → 4.3× → 3.6× → 2.2× — but does not
+  disappear.** Even `medium` still more than doubles its WER purely by moving the audio.
+- **`tiny` exceeds 100% WER at a 25 s offset** (1.4752). WER is unbounded above when the model
+  emits more words than the reference; at that offset `tiny` is generating several times the
+  reference length in looping hallucination. Its curve is also non-monotonic (0.766 at 15 s,
+  0.660 at 20 s), which is what a corpus dominated by a few catastrophic outputs looks like.
+- **Timestamps remain the whole story at every scale.** With them off, all four models are flat
+  across the window; the effect is a property of timestamp-conditioned decoding, not of the
+  acoustic encoder.
+
+![scaling, timestamps on](scaling_wer_timestamps_on.png)
+
+The Colab `base` run also serves as a cross-check on the whole apparatus: predicted from the local
+fp32/MPS data on the same 700-clip subset, offset-25 WER should be **0.2975**; the Colab fp16/CUDA
+run returned **0.2971**. A 0.0004 gap across a different device, precision and framework build.
 
 ## What makes the comparison valid
 

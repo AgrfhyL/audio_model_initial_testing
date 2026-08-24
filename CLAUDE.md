@@ -152,6 +152,12 @@ the local notebooks and matter:
 Subset size is not free: the effect is tail-driven, so 300 clips understate offset-25 WER by ~31%
 relative (0.2064 vs 0.2981). 700 tracks the full curve within 0.005.
 
+**Already run** (700 clips, T4, 41 min): the positional penalty (WER at 25 s / WER at 0 s,
+timestamps on) shrinks monotonically with scale but does not vanish — tiny 14.4×, base 4.3×,
+small 3.6×, medium 2.2×. With timestamps off every model is flat. `tiny` exceeds 100% WER at a
+25 s offset (1.4752) because it emits several times the reference length in looping
+hallucination. Results live on Drive at `MyDrive/NAACL/scaling_results.csv`, not in the repo.
+
 ## Frozen corpus
 
 `corpus_frozen/` is a self-contained copy of the 1000 selected clips plus `corpus_manifest.json`

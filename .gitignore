@@ -35,6 +35,8 @@ figs/
 !wer_vs_offset_timestamps_off.png
 !transcribe_wer_vs_offset_timestamps_on.png
 !transcribe_wer_vs_offset_timestamps_off.png
+!scaling_wer_timestamps_on.png
+!scaling_wer_timestamps_off.png
 
 # --- offset experiment outputs (contain TIMIT reference transcripts: licensed) ---
 offset_manifest.json
