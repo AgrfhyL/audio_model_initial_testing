@@ -14,6 +14,7 @@ Do not refactor shared logic into a `.py` module unless asked; the redundancy is
 | `Init_Play.ipynb` | One utterance through 5 SSL encoders (wav2vec2 / WavLM / WavLM+ / HuBERT / data2vec): sample↔frame alignment, layer probing |
 | `Whisper_Play.ipynb` | Whisper `base` ASR + WER on 10 TIMIT TRAIN utterances |
 | `Aug_23.ipynb` | Does utterance *position* in Whisper's 30 s window change the transcript? 1000 files × 6 offsets × 2 timestamp arms |
+| `Transcribe_Offset.ipynb` | Same clips re-run through `transcribe()`, in a greedy and a stock-fallback arm |
 
 `README.md` still refers to the offset experiment as `Offset_Play.ipynb`; the file was renamed to
 `Aug_23.ipynb`. Same notebook.
@@ -102,6 +103,27 @@ WER is **corpus-level** (pooled S+D+I over pooled reference length via `jiwer.pr
 lists), not a mean of per-file rates. Both hypothesis and reference go through Whisper's own
 `EnglishTextNormalizer`. Note that median per-file WER is 0.0 at every offset — the corpus effect
 is entirely tail-driven by looping hallucinations, so quoting per-file averages hides the finding.
+
+## transcribe() vs decode()
+
+`Transcribe_Offset.ipynb` re-runs the offset experiment through `model.transcribe()`. Two traps
+it documents, both verified:
+
+- **`initial_prompt=""` is not "no prompt".** `transcribe()` computes
+  `tokenizer.encode(" " + initial_prompt.strip())`, which for `""` returns `[220]` — a literal
+  space token wrapped in `<|startofprev|>`. Use `initial_prompt=None` to match `decode()`'s
+  `prompt=None`.
+- **A scalar `temperature=0.0` disarms the fallback ladder.** `decode_with_fallback` iterates a
+  temperature tuple; with a scalar there is no second temperature, so
+  `compression_ratio_threshold=2.4` and `logprob_threshold=-1.0` flag a bad window and return it
+  anyway. Only `no_speech_threshold` stays live. Passing the stock tuple re-enables the ladder but
+  makes decoding stochastic — that arm seeds per-cell from a hash of
+  `(path, offset, timestamps, arm)` so it stays reproducible and resume-safe.
+
+Empirically: with timestamps **off**, `transcribe()` greedy is bit-identical to `decode()` at
+every offset (the seek loop never re-seeks without timestamp tokens). With timestamps **on**, the
+two diverge on exactly the files where the loop re-seeks. Results cache is
+`transcribe_results.csv`, keyed by `(path, offset_s, timestamps, fallback)`.
 
 ## Frozen corpus
 

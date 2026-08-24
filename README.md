@@ -13,7 +13,8 @@ year."*
 |---|---|
 | `Init_Play.ipynb` | One TIMIT utterance through five self-supervised encoders (below) |
 | `Whisper_Play.ipynb` | Whisper `base` ASR + WER on a 10-utterance TIMIT sample, with audio playback |
-| `Offset_Play.ipynb` | Does *where* an utterance sits in Whisper's 30 s window change the transcript? |
+| `Aug_23.ipynb` | Does *where* an utterance sits in Whisper's 30 s window change the transcript? |
+| `Transcribe_Offset.ipynb` | The same experiment through `transcribe()` instead of `decode()` |
 
 ## Models
 
@@ -170,3 +171,55 @@ being measured.
 
 Outputs (`offset_manifest.json`, `offset_results.csv`, the PNGs) are gitignored - the manifest
 and CSV embed TIMIT reference transcripts, which are licensed.
+
+---
+
+# `transcribe()` vs `decode()` on the same clips
+
+`Transcribe_Offset.ipynb`. The experiment above deliberately used `whisper.decode()` to strip out
+everything `transcribe()` layers on top. This re-runs it on the **same 1000 frozen clips** through
+`model.transcribe()` to measure what those layers actually cost, in two fallback arms:
+
+- **greedy** - `temperature=0.0` as a scalar, honouring the original control list. The fallback
+  ladder never fires, so `compression_ratio_threshold` and `logprob_threshold` are **inert**.
+- **stock** - `temperature=(0.0, 0.2, ..., 1.0)`, Whisper as shipped. Repetitive or low-confidence
+  windows are re-decoded at rising temperature.
+
+24 000 `transcribe()` calls (~77 min; unlike `decode()`, `transcribe()` takes audio, not a mel,
+and cannot be batched). The corpus is loaded via `load_frozen()` and the notebook asserts
+`results_csv_sha256` against `offset_results.csv`, so the `decode()` baseline is provably the same
+run those numbers came from.
+
+## Results
+
+| offset | ON: decode | ON: greedy | ON: stock | OFF: decode | OFF: greedy | OFF: stock |
+|--------:|-----:|-----:|-----:|-----:|-----:|-----:|
+| 0 s  | 0.0705 | 0.0705 | 0.0689 | 0.0810 | 0.0810 | 0.0674 |
+| 5 s  | 0.0970 | 0.0970 | 0.0789 | 0.0732 | 0.0732 | 0.0732 |
+| 10 s | 0.0962 | 0.0965 | 0.0903 | 0.0779 | 0.0779 | 0.0689 |
+| 15 s | 0.1129 | 0.1252 | 0.1051 | 0.0707 | 0.0707 | 0.0707 |
+| 20 s | 0.1547 | 0.1642 | 0.1403 | 0.0716 | 0.0716 | 0.0716 |
+| 25 s | 0.2981 | 0.2920 | **0.1626** | 0.0780 | 0.0780 | 0.0691 |
+
+- **With timestamps off, `transcribe()` greedy is bit-identical to `decode()` at every offset.**
+  All six deltas are exactly zero, with zero re-seeks and exactly 1.00 segments per utterance.
+  Without timestamp tokens the seek loop has nothing to advance on, so it jumps a full window and
+  terminates after one pass - every layer `transcribe()` adds is inert.
+- **With timestamps on, the two diverge only where the loop re-seeks**, and the counts match
+  exactly: 19 files differ / 19 re-seek at 15 s, 67/67 at 20 s, 120/121 at 25 s. When the emitted
+  closing timestamp falls short of the window end, `seek` advances only that far and the remaining
+  tail is decoded *again*, appending a duplicate fragment. Re-seeking rises monotonically with
+  offset (0 -> 121 files) because a later utterance is likelier to leave a tail.
+- **The stock fallback is what actually rescues the late-offset collapse**: 0.2981 -> 0.1626 at
+  25 s, a 45 % relative cut. It fires on only 109/1000 files - the same heavy tail as before,
+  working in reverse. Because the damage is concentrated in a handful of runaway hallucinations, a
+  threshold catching just those files buys back a disproportionate share of corpus WER.
+- **The position effect survives the rescue.** Even with stock fallback, timestamps-on WER still
+  runs 0.069 -> 0.163 across the window (2.4x). Fallback mitigates the failure mode; it does not
+  remove the positional sensitivity.
+- `no_speech_threshold` never skipped a window (`empty = 0` at every cell), so that third
+  threshold contributes nothing at this utterance length.
+
+The practical read: if you feed Whisper short clips with timestamps enabled, keep the stock
+temperature fallback - switching to strict greedy silently disarms the one mechanism that catches
+positional hallucination.

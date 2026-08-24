@@ -33,10 +33,13 @@ figs/
 # --- exceptions: these two figures contain no TIMIT audio/text, just WER numbers ---
 !wer_vs_offset_timestamps_on.png
 !wer_vs_offset_timestamps_off.png
+!transcribe_wer_vs_offset_timestamps_on.png
+!transcribe_wer_vs_offset_timestamps_off.png
 
 # --- offset experiment outputs (contain TIMIT reference transcripts: licensed) ---
 offset_manifest.json
 offset_results.csv
+transcribe_results.csv
 
 # --- frozen corpus copy (TIMIT audio + transcripts: LDC93S1, not redistributable) ---
 corpus_frozen/
