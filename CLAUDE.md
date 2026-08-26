@@ -17,6 +17,7 @@ redundancy is the design.
 | `Aug_23.ipynb` | The core experiment: does position change the transcript? 1000 files × 6 offsets × 2 timestamp arms, via `whisper.decode()` |
 | `Transcribe_Offset.ipynb` | Same clips through `transcribe()`, in a greedy and a stock-fallback arm |
 | `Colab_ModelScaling.ipynb` | Does the effect shrink with model size? tiny/base/small/medium on a Colab GPU (CUDA, fp16) |
+| `Colab_DeltaSweep.ipynb` | Per-utterance difference-in-differences on the held-out 300 — which utterances carry the timestamp-specific positional penalty |
 
 `archive/` holds **discontinued** work — `Init_Play.ipynb` (five SSL encoders) and
 `Whisper_Play.ipynb` (10-file Whisper WER warm-up). Neither is being continued; do not extend them
@@ -157,6 +158,39 @@ timestamps on) shrinks monotonically with scale but does not vanish — tiny 14.
 small 3.6×, medium 2.2×. With timestamps off every model is flat. `tiny` exceeds 100% WER at a
 25 s offset (1.4752) because it emits several times the reference length in looping
 hallucination. Results live on Drive at `MyDrive/NAACL/scaling_results.csv`, not in the repo.
+
+## Per-utterance delta sweep
+
+`Colab_DeltaSweep.ipynb` computes
+`delta_m = [WER(25s,on)-WER(5s,on)] - [WER(25s,off)-WER(5s,off)]` per utterance, over draw slice
+`[700:1000]` — disjoint from the scaling sweep's `[0:700]`, still all 168 speakers. Baseline is
+5 s, not 0 s, because offset 0's mel is not a pure shift (reflect padding).
+
+`delta_m` is **zero-inflated and heavy-tailed** (local base preview: 237/300 exactly zero, top 5
+carrying 69% of the total). Never summarize it with a mean alone — report prevalence (sign split)
+and severity separately.
+
+### Licensing discipline for Colab notebooks
+
+Saving a Colab notebook back to GitHub commits its outputs, so **a printed transcript is a
+committed transcript**. The rules these notebooks follow:
+
+- never print reference or hypothesis text — counts, digests and numeric scores only
+- split results: a Drive-only file carrying hypotheses (`delta_results_full.csv`, gitignored) and
+  a git-safe file of paths and numbers (`delta_per_utterance.csv`)
+- assert the split before writing: no forbidden column names, no free-text values
+- pin references with a SHA-256 over `path \t normalized_reference` rather than storing text
+
+Note `.gitignore` does **not** support inline comments — `foo.csv  # note` is a literal pattern
+that matches nothing. Put comments on their own line.
+
+### Provenance recorded
+
+`delta_provenance.json` captures: package versions; SHA-256 of `whisper`'s `audio.py`,
+`decoding.py`, `model.py` (version strings are coarse, hashing the code that runs is not); each
+checkpoint's on-disk digest verified against the hash embedded in whisper's download URL
+(`url.split("/")[-2]`); GPU name/capability and precision; verbatim `DecodingOptions`; and digests
+over both the audio arrays and the normalized references.
 
 ## Frozen corpus
 

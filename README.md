@@ -79,6 +79,30 @@ The Colab `base` run also serves as a cross-check on the whole apparatus: predic
 fp32/MPS data on the same 700-clip subset, offset-25 WER should be **0.2975**; the Colab fp16/CUDA
 run returned **0.2971**. A 0.0004 gap across a different device, precision and framework build.
 
+## Which utterances carry it?
+
+Corpus WER says late placement hurts; it cannot say *which* utterances. `Colab_DeltaSweep.ipynb`
+measures a paired per-utterance quantity on the **held-out 300** — draw entries `[700:1000]`,
+disjoint from the 700 the scaling sweep used, still covering all 168 speakers:
+
+```
+delta_m = [WER(m, 25s, ts on)  - WER(m, 5s, ts on) ]
+        - [WER(m, 25s, ts off) - WER(m, 5s, ts off)]
+```
+
+A difference in differences. The inner brackets are the cost of moving that utterance from 5 s to
+25 s, with and without timestamps; subtracting removes any position effect independent of
+timestamps along with every per-utterance confound constant across offsets — speaker, sentence,
+duration, difficulty. What remains is the penalty that exists *only because timestamps are on*,
+isolated per utterance. 5 s is the baseline rather than 0 s because offset 0 is the one position
+whose mel is not a pure shift (reflect padding); 5 s and 25 s are exact integer-frame shifts of
+one another.
+
+The distribution is **zero-inflated and heavy-tailed** — on a local `base` preview of these same
+300 clips, 237 were exactly 0, 46 positive, 17 negative, and the five largest carried 69% of the
+summed effect. Mean and median therefore say different things, so the notebook reports prevalence
+(how many utterances are affected) and severity (how much) as separate figures.
+
 ## What makes the comparison valid
 
 The experiment is only meaningful if moving the audio changes *nothing but* its position. Three
@@ -163,7 +187,17 @@ reads them natively, returning 16 kHz mono float32. `scipy.io.wavfile` cannot. T
 in a sibling `.TXT` whose first two integers are sample offsets and must be stripped.
 
 Everything that embeds TIMIT audio or transcripts is gitignored: `corpus_frozen/`,
-`offset_manifest.json`, `offset_results.csv`, `transcribe_results.csv`.
+`offset_manifest.json`, `offset_results.csv`, `transcribe_results.csv`,
+`delta_results_full.csv`.
+
+The Colab notebooks go further, because saving a Colab notebook back to GitHub commits its
+outputs: they never print transcript text, they split results into a Drive-only file that carries
+hypotheses and a git-safe file that carries only paths and numbers, and they assert that split
+before writing. `Colab_DeltaSweep.ipynb` also records a full provenance block — package versions,
+SHA-256 of the `whisper` source files that define the decode path, each checkpoint's digest
+checked against the hash embedded in its download URL, device and precision, the verbatim
+`DecodingOptions`, and digests over both the audio arrays and the *normalized references*. The
+reference digest pins exactly what was scored without storing any transcript.
 
 ## Requirements
 
