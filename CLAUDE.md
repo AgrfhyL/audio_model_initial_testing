@@ -184,6 +184,23 @@ committed transcript**. The rules these notebooks follow:
 Note `.gitignore` does **not** support inline comments — `foo.csv  # note` is a literal pattern
 that matches nothing. Put comments on their own line.
 
+### Persistence
+
+All outputs go to `MyDrive/NAACL/`, never to the runtime's local disk, so the runtime can be
+disconnected once section 7 has run:
+
+- `delta_per_utterance.csv` — one row per (model, utterance) with `delta_m`, the four component
+  WERs, both inner differences, and `speaker` / `region` / `sec` / `n_ref_words`. Keeping
+  `n_ref_words` is what lets per-file WERs be re-pooled into a corpus-level number later; a file
+  of WER ratios alone could not.
+- `delta_results_full.csv` — raw hypotheses, appended batch by batch with `flush()`, so a
+  disconnect mid-sweep only costs the batch in flight and the run resumes.
+- `delta_provenance.json` — versions, digests, decoding options, summary with CIs.
+
+Section 10 is a **standalone reload cell**: no GPU, no TIMIT, no earlier cells. Section 7 reads
+`delta_per_utterance.csv` back and compares it to the in-memory rows, which proves the write
+actually reached Drive rather than sitting in a FUSE buffer.
+
 ### Provenance recorded
 
 `delta_provenance.json` captures: package versions; SHA-256 of `whisper`'s `audio.py`,
