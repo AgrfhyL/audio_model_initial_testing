@@ -101,7 +101,19 @@ one another.
 The distribution is **zero-inflated and heavy-tailed** — on a local `base` preview of these same
 300 clips, 237 were exactly 0, 46 positive, 17 negative, and the five largest carried 69% of the
 summed effect. Mean and median therefore say different things, so the notebook reports prevalence
-(how many utterances are affected) and severity (how much) as separate figures.
+(how many utterances are affected) and severity (how much) separately, each with an interval
+matched to the quantity:
+
+- **mean `delta_m`** — BCa bootstrap, clustered by speaker. The skew makes the naive percentile
+  interval biased: on the preview it gave `[+0.089, +0.417]` where BCa gives `[+0.117, +0.507]`.
+- **proportions** — Wilson score intervals, which stay inside `[0, 1]` and behave at small counts.
+- **sign test** — exact two-sided binomial on positives vs negatives among affected utterances;
+  distribution-free, so the heavy tail cannot distort it.
+
+On that `base` preview the mean is `+0.226`, CI `[+0.117, +0.507]` — excluding zero, but wide and
+asymmetric because a handful of utterances drive it. 15.3% of utterances have `delta_m > 0`
+(Wilson `[11.7%, 19.9%]`), and among affected ones 73% are hurt rather than helped
+(sign test *p* = 0.0003).
 
 ## What makes the comparison valid
 
