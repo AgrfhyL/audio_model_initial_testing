@@ -82,8 +82,9 @@ run returned **0.2971**. A 0.0004 gap across a different device, precision and f
 ## Which utterances carry it?
 
 Corpus WER says late placement hurts; it cannot say *which* utterances. `Colab_DeltaSweep.ipynb`
-measures a paired per-utterance quantity on the **held-out 300** — draw entries `[700:1000]`,
-disjoint from the 700 the scaling sweep used, still covering all 168 speakers:
+measures a paired per-utterance quantity over **all 1000 clips** — the same corpus `Aug_23.ipynb`
+scored, so results join to it by `path` — across `tiny`, `base`, `small`, `medium` and
+`large-v3`:
 
 ```
 delta_m = [WER(m, 25s, ts on)  - WER(m, 5s, ts on) ]
@@ -98,22 +99,22 @@ isolated per utterance. 5 s is the baseline rather than 0 s because offset 0 is 
 whose mel is not a pure shift (reflect padding); 5 s and 25 s are exact integer-frame shifts of
 one another.
 
-The distribution is **zero-inflated and heavy-tailed** — on a local `base` preview of these same
-300 clips, 237 were exactly 0, 46 positive, 17 negative, and the five largest carried 69% of the
-summed effect. Mean and median therefore say different things, so the notebook reports prevalence
+The distribution is **zero-inflated and heavy-tailed** — over all 1000 clips on the local `base`
+run, 782 were exactly 0, 171 positive, 47 negative, mean `+0.226` against a median of `0.000`. Mean and median therefore say different things, so the notebook reports prevalence
 (how many utterances are affected) and severity (how much) separately, each with an interval
 matched to the quantity:
 
-- **mean `delta_m`** — BCa bootstrap, clustered by speaker. The skew makes the naive percentile
-  interval biased: on the preview it gave `[+0.089, +0.417]` where BCa gives `[+0.117, +0.507]`.
+- **mean `delta_m`** — BCa bootstrap, 10 000 resamples of size 1000. The skew makes the naive
+  percentile interval biased, so endpoints come from BCa-adjusted percentiles.
 - **proportions** — Wilson score intervals, which stay inside `[0, 1]` and behave at small counts.
 - **sign test** — exact two-sided binomial on positives vs negatives among affected utterances;
   distribution-free, so the heavy tail cannot distort it.
 
-On that `base` preview the mean is `+0.226`, CI `[+0.117, +0.507]` — excluding zero, but wide and
-asymmetric because a handful of utterances drive it. 15.3% of utterances have `delta_m > 0`
-(Wilson `[11.7%, 19.9%]`), and among affected ones 73% are hurt rather than helped
-(sign test *p* = 0.0003).
+On the `base` run the mean is `+0.226`, CI `[+0.138, +0.378]` from 10 000 BCa resamples of size
+1000 — excluding zero, but wide and asymmetric because a handful of utterances drive it. 17.1% of
+utterances have `delta_m > 0` (Wilson `[14.9%, 19.6%]`), and among affected ones 78% are hurt
+rather than helped (sign test *p* < 1e-5). A speaker-clustered interval is reported alongside as a
+cross-check on the independence assumption; the two agree closely here (`[+0.145, +0.377]`).
 
 ## What makes the comparison valid
 
