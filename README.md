@@ -110,6 +110,12 @@ matched to the quantity:
 - **sign test** — exact two-sided binomial on positives vs negatives among affected utterances;
   distribution-free, so the heavy tail cannot distort it.
 
+Batch size is held at **8 for every model** — it divides 1000 exactly, so no model ends on a
+ragged remainder batch, and it fits `large-v3` on a T4 without the memory limit ever being
+discovered by hitting it. Decode output was verified byte-identical at batch 16/8/4/1 in both
+fp32 and fp16, so this is about holding a nuisance parameter constant rather than fixing a known
+error.
+
 On the `base` run the mean is `+0.226`, CI `[+0.138, +0.378]` from 10 000 BCa resamples of size
 1000 — excluding zero, but wide and asymmetric because a handful of utterances drive it. 17.1% of
 utterances have `delta_m > 0` (Wilson `[14.9%, 19.6%]`), and among affected ones 78% are hurt
