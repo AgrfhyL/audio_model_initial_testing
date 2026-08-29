@@ -17,7 +17,8 @@ redundancy is the design.
 | `Aug_23.ipynb` | The core experiment: does position change the transcript? 1000 files × 6 offsets × 2 timestamp arms, via `whisper.decode()` |
 | `Transcribe_Offset.ipynb` | Same clips through `transcribe()`, in a greedy and a stock-fallback arm |
 | `Colab_ModelScaling.ipynb` | Does the effect shrink with model size? tiny/base/small/medium on a Colab GPU (CUDA, fp16) |
-| `Colab_DeltaSweep.ipynb` | Per-utterance difference-in-differences on the held-out 300 — which utterances carry the timestamp-specific positional penalty |
+| `Colab_DeltaSweep.ipynb` | Per-utterance difference-in-differences over all 1000 clips — which utterances carry the timestamp-specific positional penalty |
+| `Colab_PositionalEmbedding.ipynb` | P0–P4: displaces the encoder positional embedding directly to test whether it *causes* the positional penalty |
 
 `archive/` holds **discontinued** work — `Init_Play.ipynb` (five SSL encoders) and
 `Whisper_Play.ipynb` (10-file Whisper WER warm-up). Neither is being continued; do not extend them
@@ -208,6 +209,29 @@ actually reached Drive rather than sitting in a FUSE buffer.
 checkpoint's on-disk digest verified against the hash embedded in whisper's download URL
 (`url.split("/")[-2]`); GPU name/capability and precision; verbatim `DecodingOptions`; and digests
 over both the audio arrays and the normalized references.
+
+## Editing the positional embedding
+
+`AudioEncoder.positional_embedding` is a `register_buffer` of fixed sinusoids, shape
+`(n_audio_ctx, n_state)` = `(1500, n_state)`, added after the conv stack. 1500 frames / 30 s =
+**50 frames per second**, so N seconds = `N * 50` rows.
+
+**Displace it with a cyclic roll, never by rebuilding sinusoids at shifted positions.**
+Extrapolation gives leading-silence frames negative positions that the model never saw in
+training; measured effect is corpus WER 0.0586 -> 6.4163 with 18/60 clips collapsing into
+repetition loops. A roll keeps every row a genuine training-time position.
+
+```python
+pe.copy_(torch.roll(saved, shifts=int(-seconds * 50), dims=0))   # not sinusoids(arange - k)
+```
+
+Use `pe.copy_()` rather than reassignment so dtype/device survive under fp16, and always restore
+in a `finally` — `load_model` caches, so a leaked displacement contaminates every later decode.
+`rolled_pe` asserts restoration on exit.
+
+Note a +N second displacement **wraps**: audio at 25 s displaced +20 s would be 45 s, outside the
+window, so it lands at 15 s. That makes P3 an "incorrectly but in-range relabelled" control rather
+than a literal +20 s.
 
 ## Frozen corpus
 

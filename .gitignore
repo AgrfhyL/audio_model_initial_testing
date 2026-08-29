@@ -39,12 +39,15 @@ figs/
 !scaling_wer_timestamps_off.png
 !delta_severity.png
 !delta_prevalence.png
+!pe_wer_timestamps_on.png
+!pe_wer_timestamps_off.png
 
 # --- offset experiment outputs (contain TIMIT reference transcripts: licensed) ---
 offset_manifest.json
 offset_results.csv
 transcribe_results.csv
 delta_results_full.csv
+pe_results_full.csv
 
 # --- frozen corpus copy (TIMIT audio + transcripts: LDC93S1, not redistributable) ---
 corpus_frozen/

@@ -122,6 +122,35 @@ utterances have `delta_m > 0` (Wilson `[14.9%, 19.6%]`), and among affected ones
 rather than helped (sign test *p* < 1e-5). A speaker-clustered interval is reported alongside as a
 cross-check on the independence assumption; the two agree closely here (`[+0.145, +0.377]`).
 
+## What causes it? Editing the positional embedding
+
+`Colab_PositionalEmbedding.ipynb`. Whisper's `AudioEncoder` adds a fixed sinusoidal embedding
+after the convolutions — a `register_buffer`, not a learned parameter, of shape `(1500, n_state)`,
+so 1500 frames over 30 s means **50 frames per second**. Overwriting it isolates position from
+everything else: the audio stays byte-identical, only its label changes.
+
+| | audio at | positional embedding | first timestamp |
+|---|---|---|---|
+| P0 | 5 s | unchanged | capped (stock) |
+| P1 | 25 s | unchanged | capped |
+| P2 | 25 s | displaced −20 s | capped |
+| P3 | 25 s | displaced +20 s (wraps to 15 s) | capped |
+| P4 | 25 s | unchanged | **uncapped** |
+
+P0–P3 run with timestamps on and off; P4 only with them on. 45 000 decodes across five models.
+
+**The displacement must be a cyclic roll, not extrapolated sinusoids.** Rebuilding the sinusoids at
+`arange(1500) - 1000` gives the leading silence frames *negative* positions the model never saw in
+training, and that is catastrophic — measured on 60 clips at 25 s with timestamps off, corpus WER
+goes from 0.0586 to **6.4163** with 18/60 outputs collapsing into repetition loops. A roll assigns
+every frame a genuine training-time position and avoids it. This matters because the naive version
+looks like it works if you only check files that were already failing.
+
+Early indication from a 16-clip local probe on `base` (timestamps on): P0 0.0661, P1 0.4793,
+**P2 0.0661** — the displacement fully recovers the baseline — and P4 0.4380, meaning the
+`max_initial_timestamp` cap accounts for very little of the penalty. The full 1000-clip run across
+five models is what settles it.
+
 ## What makes the comparison valid
 
 The experiment is only meaningful if moving the audio changes *nothing but* its position. Three
