@@ -45,6 +45,8 @@ Quote the corpus WER, and keep the corpus large enough to contain the tail.
 | `Aug_23.ipynb` | Does position change the transcript? Isolates the effect with `whisper.decode()` — one encoder pass, one greedy decode, nothing else. |
 | `Transcribe_Offset.ipynb` | What does the full `transcribe()` pipeline add on top? Same clips, greedy and stock-fallback arms. |
 | `Colab_ModelScaling.ipynb` | Does the effect shrink with model size? `tiny`/`base`/`small`/`medium` on a Colab GPU — **run, see below**. [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/AgrfhyL/audio_model_initial_testing/blob/main/Colab_ModelScaling.ipynb) |
+| `Colab_PositionalEmbedding.ipynb` | Does the positional embedding *cause* it? P0–P4 displace the embedding directly. [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/AgrfhyL/audio_model_initial_testing/blob/main/Colab_PositionalEmbedding.ipynb) |
+| `Colab_ExperimentC.ipynb` | Is the effect in the encoder or the decoder? Teacher-forced ΔNLL, timestamp-margin pressure, generated behaviour. [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/AgrfhyL/audio_model_initial_testing/blob/main/Colab_ExperimentC.ipynb) |
 
 Earlier, discontinued work lives in [`archive/`](archive/) — a five-encoder self-supervised
 probing study and a 10-file Whisper WER warm-up. Neither is being continued.
@@ -150,6 +152,40 @@ Early indication from a 16-clip local probe on `base` (timestamps on): P0 0.0661
 **P2 0.0661** — the displacement fully recovers the baseline — and P4 0.4380, meaning the
 `max_initial_timestamp` cap accounts for very little of the penalty. The full 1000-clip run across
 five models is what settles it.
+
+## Encoder or decoder? Experiment C
+
+`Colab_ExperimentC.ipynb`. Rolling the positional embedding shows it is **sufficient** to produce
+the penalty, but not where the penalty lives — the roll changes the encoder output, and the encoder
+output is what the decoder cross-attends to. Two stories fit equally well:
+
+| | claim |
+|---|---|
+| **Encoder account** | placing audio at 25 s degrades the acoustic representation; the roll repairs it |
+| **Decoder account** | the representation is fine, but carries an intact position signal the decoder mishandles once timestamp tokens are live; the roll removes the *cue*, not a *defect* |
+
+Three measurements separate them, on conditions C0 (5 s), C1 (25 s) and C2 (25 s with the
+embedding rolled −20 s), each with timestamps on and off:
+
+**1. Teacher-forced ΔNLL.** Force the model down the reference token sequence and score the text
+tokens. The path is fixed by construction, so looping, the timestamp rules and the token cap cannot
+contribute — what is left reads whether the representation still supports the correct words.
+`ΔNLL = NLL(25 s) − NLL(5 s)`, paired per utterance. Levels are not comparable across model sizes,
+but this within-model difference cancels baseline competence.
+
+**2. The timestamp margin.** `logsumexp(timestamp logprobs) − max(text logprobs)`, which is not an
+invented metric but verbatim the decision variable of Whisper's own `ApplyTimestampRules`. Above
+zero, every text token is masked to `−inf` and the decoder is *forced* to emit a timestamp — and
+that filter exists only in the timestamps-on arm, which is exactly how the two arms diverge while
+sharing an encoder.
+
+**3. Generated behaviour.** A free `decode()` on the same representation: timestamps emitted,
+output length against reference length, insertions, token-cap hits.
+
+The discriminator is the **shape across scale**. The penalty is already known to shrink 14.4× →
+2.2×; the encoder account predicts ΔNLL shrinks with it, the decoder account predicts ΔNLL stays
+flat while the runaway rate falls. The two are not mutually exclusive, so the notebook reports the
+split rather than picking a winner.
 
 ## What makes the comparison valid
 

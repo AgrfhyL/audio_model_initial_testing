@@ -19,6 +19,7 @@ redundancy is the design.
 | `Colab_ModelScaling.ipynb` | Does the effect shrink with model size? tiny/base/small/medium on a Colab GPU (CUDA, fp16) |
 | `Colab_DeltaSweep.ipynb` | Per-utterance difference-in-differences over all 1000 clips — which utterances carry the timestamp-specific positional penalty |
 | `Colab_PositionalEmbedding.ipynb` | P0–P4: displaces the encoder positional embedding directly to test whether it *causes* the positional penalty |
+| `Colab_ExperimentC.ipynb` | Localizes the penalty: teacher-forced ΔNLL, timestamp-margin pressure, and generated behaviour across the model ladder |
 
 `archive/` holds **discontinued** work — `Init_Play.ipynb` (five SSL encoders) and
 `Whisper_Play.ipynb` (10-file Whisper WER warm-up). Neither is being continued; do not extend them
@@ -232,6 +233,84 @@ in a `finally` — `load_model` caches, so a leaked displacement contaminates ev
 Note a +N second displacement **wraps**: audio at 25 s displaced +20 s would be 45 s, outside the
 window, so it lands at 15 s. That makes P3 an "incorrectly but in-range relabelled" control rather
 than a literal +20 s.
+
+## Experiment C: localizing the penalty (`Colab_ExperimentC.ipynb`)
+
+Rolling the positional embedding shows it is *sufficient* to produce the penalty, but not *where*
+the penalty lives — a roll changes the encoder output, which is what the decoder cross-attends to.
+Experiment C separates an **encoder account** (the representation at 25 s is degraded) from a
+**decoder account** (the representation is fine, but carries a position signal the decoder
+mishandles once timestamp tokens are live).
+
+Conditions are C0 (5 s), C1 (25 s), C2 (25 s, PE rolled −20 s), each with timestamps on and off —
+6 cells per (model, clip), 30 000 in total across the five-model ladder.
+
+**The discriminator is the shape across scale, not any single model.** The WER penalty is already
+known to shrink 14.4× → 2.2×. Encoder account predicts ΔNLL shrinks with it; decoder account
+predicts ΔNLL stays flat while the runaway rate falls. So it must run on the same ladder and the
+same 1000 clips, or there is nothing to regress against.
+
+### Teacher forcing
+
+`Whisper.logits(tokens, audio_features)` is `decoder(tokens, audio_features)` with `kv_cache=None`,
+which is one non-cached forward under the causal mask — exactly teacher forcing. Logits are cast
+to fp32 by `TextDecoder.forward`, so the log-softmax is fp32 even under fp16 weights.
+
+`ΔNLL = NLL(C1) − NLL(C0)` is **paired per utterance**, over text tokens only. NLL *levels* are not
+comparable across model sizes; the within-model difference cancels baseline competence, which is
+what makes it the right cross-scale axis.
+
+- **Sequences are right-padded with EOT.** Inert under a causal mask — verified to 5e-7 in fp32.
+- **The encoder runs once per (batch, condition).** `DecodingTask._get_audio_features` skips
+  encoding when handed a tensor already shaped `(B, n_audio_ctx, n_audio_state)`, so one
+  `audio_features` feeds the forced pass, the free `decode()` and both arms. That also means
+  `rolled_pe` need only wrap the encoder call, so a displacement cannot leak into decoding.
+- **C2's forced timestamps describe the *perceived* position (5 s), not 25 s.** The roll tells the
+  model the audio sits at 5 s; forcing `<|25.00|>` would score a path inconsistent with the model's
+  own positional evidence.
+- **Scoring reads raw logits, no `LogitFilter`.** Forcing `<|25.00|>` while `max_initial_timestamp`
+  masks it to −inf would make the target unreachable and its NLL infinite.
+
+### The margin is Whisper's own rule, not an invented metric
+
+`margin = logsumexp(timestamp logprobs) − max(text logprobs)` is verbatim the decision variable at
+the end of `ApplyTimestampRules` in `decoding.py`. When it exceeds 0, every text token is masked to
+−inf and the decoder **must** emit a timestamp. That filter is installed only when
+`without_timestamps=False`, which is precisely how the two arms diverge while sharing an encoder.
+
+Two counting traps, both hit and fixed:
+
+- **Count crossings over text steps only.** Over all steps the legitimate closing-timestamp step
+  always crosses, so the count is trivially ≥ 1 and useless.
+- **First-timestamp diagnostics must be conditional on emitting a timestamp** — renormalized within
+  the timestamp block. Unconditionally the mass on any single timestamp is ~1e-5, because unmasked
+  the model would rather emit text. Conditioned properly, `ts_forbidden_mass` is exactly what
+  `max_initial_timestamp=1.0` deletes.
+
+### Precision
+
+**Never call `model.half()`.** Load fp32 and cast only the mel — which is what `decode()` does
+internally, so this reproduces the earlier Colab sweeps exactly. PyTorch promotes, the encoder
+returns fp16, and the decoder runs in fp16. Two reasons this matters:
+
+- an fp32 → fp16 → fp32 round trip permanently damages the weights, silently contaminating the
+  fp32 leg of any precision comparison;
+- on **MPS**, `model.half()` makes the encoder emit NaN, while an fp32 model fed a half mel is
+  fine. CPU fp16 is unavailable altogether (`layer_norm` rejects mixed dtype), so fp16 cannot be
+  tested locally at all — the notebook measures it on the actual GPU instead.
+
+Measured on 64 clips: fp16 vs fp32 ΔNLL bias 4e-5, per-clip RMS 7e-4, r = 0.9999 — the effect is
+~600× the fp16 noise on an n=1000 mean. Separately, fp16 kernel selection varies with **batch
+shape** (~1e-3), which cancels in the paired difference only because every condition for a clip is
+scored at the same batch index and size. That is why `BATCH` is pinned rather than discovered.
+
+### Outputs
+
+`MyDrive/NAACL/` again: `expc_results_full.csv` (carries hypotheses, gitignored),
+`expc_per_utterance.csv` (git-safe; asserted numeric apart from `model`/`cond`/`timestamps` and
+`path`/`speaker`/`region`), `expc_provenance.json`. Raw S/D/I counts and `n_ref_words` are kept per
+row so corpus WER stays re-poolable from the git-safe file alone; section 14 is a standalone reload
+that needs no GPU, no TIMIT and no earlier cells.
 
 ## Frozen corpus
 
