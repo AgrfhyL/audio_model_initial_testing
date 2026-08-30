@@ -20,6 +20,7 @@ redundancy is the design.
 | `Colab_DeltaSweep.ipynb` | Per-utterance difference-in-differences over all 1000 clips — which utterances carry the timestamp-specific positional penalty |
 | `Colab_PositionalEmbedding.ipynb` | P0–P4: displaces the encoder positional embedding directly to test whether it *causes* the positional penalty |
 | `Colab_ModelScaling copy.ipynb` | The same sweep re-run at the project-standard configuration: 1000 clips, five models incl. `large-v3`, batch 8. Writes `scaling_results_1000.csv`; supersedes the original for cross-experiment comparisons |
+| `Figures.ipynb` | Redraws every figure as **vector PDF** from the stored per-condition CSVs. No GPU, no TIMIT, no decoding |
 | `Colab_ExperimentC.ipynb` | Localizes the penalty: teacher-forced ΔNLL, timestamp-margin pressure, and generated behaviour across the model ladder |
 
 `archive/` holds **discontinued** work — `Init_Play.ipynb` (five SSL encoders) and
@@ -320,6 +321,30 @@ scored at the same batch index and size. That is why `BATCH` is pinned rather th
 `path`/`speaker`/`region`), `expc_provenance.json`. Raw S/D/I counts and `n_ref_words` are kept per
 row so corpus WER stays re-poolable from the git-safe file alone; section 14 is a standalone reload
 that needs no GPU, no TIMIT and no earlier cells.
+
+## Publication figures
+
+Every experiment notebook writes PNG at 160 dpi, sized for a notebook cell — the wrong artefact for
+a paper. `Figures.ipynb` redraws them as **vector PDF** at ACL column widths (3.15 in single,
+6.30 in full) from the numbers-only files each sweep leaves on Drive, so nothing is decoded again:
+
+| source | file |
+|---|---|
+| O scaling | `scaling_per_condition.csv` |
+| A delta sweep | `delta_per_utterance.csv` |
+| B positional embedding | `pe_per_condition.csv` |
+| C localization | `expc_per_utterance.csv` |
+
+Missing files are skipped with a notice, so it runs usefully before every sweep has finished. It
+also emits the two `booktabs` tables.
+
+`pdf.fonttype = 42` is not optional — matplotlib's default Type 3 embedding is rejected by arXiv's
+checker and by some venues. Set the figure to its final print width here rather than rescaling with
+`\includegraphics`, which is what makes axis labels unreadable.
+
+Note the scaling sweep originally had **no** numbers-only output at all — its WER existed only in
+printed cell output — so `Colab_ModelScaling copy.ipynb` now writes `scaling_per_condition.csv`
+with pooled S/D/I per (model, offset, arm), asserted to reproduce `corpus_wer` from the counts.
 
 ## Frozen corpus
 
