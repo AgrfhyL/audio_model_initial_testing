@@ -19,6 +19,7 @@ redundancy is the design.
 | `Colab_ModelScaling.ipynb` | Does the effect shrink with model size? tiny/base/small/medium on a Colab GPU (CUDA, fp16) |
 | `Colab_DeltaSweep.ipynb` | Per-utterance difference-in-differences over all 1000 clips — which utterances carry the timestamp-specific positional penalty |
 | `Colab_PositionalEmbedding.ipynb` | P0–P4: displaces the encoder positional embedding directly to test whether it *causes* the positional penalty |
+| `Colab_ModelScaling copy.ipynb` | The same sweep re-run at the project-standard configuration: 1000 clips, five models incl. `large-v3`, batch 8. Writes `scaling_results_1000.csv`; supersedes the original for cross-experiment comparisons |
 | `Colab_ExperimentC.ipynb` | Localizes the penalty: teacher-forced ΔNLL, timestamp-margin pressure, and generated behaviour across the model ladder |
 
 `archive/` holds **discontinued** work — `Init_Play.ipynb` (five SSL encoders) and
@@ -154,6 +155,14 @@ the local notebooks and matter:
 
 Subset size is not free: the effect is tail-driven, so 300 clips understate offset-25 WER by ~31%
 relative (0.2064 vs 0.2981). 700 tracks the full curve within 0.005.
+
+Two variants exist. The original ran 700 clips over four models at batch 16 and its numbers are
+what the README quotes. `Colab_ModelScaling copy.ipynb` re-runs the same design at the
+configuration every other notebook uses — 1000 clips, five models including `large-v3`, batch 8 —
+so O, A, B and C all draw on one corpus under one decoding setup. It writes to
+`scaling_results_1000.csv` rather than resuming `scaling_results.csv`, because the cached rows came
+from 700-clip batches of 16 and reusing them would leave the grid half-decoded under each
+configuration.
 
 **Already run** (700 clips, T4, 41 min): the positional penalty (WER at 25 s / WER at 0 s,
 timestamps on) shrinks monotonically with scale but does not vanish — tiny 14.4×, base 4.3×,
