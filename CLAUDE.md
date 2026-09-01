@@ -22,6 +22,7 @@ redundancy is the design.
 | `Colab_ModelScaling copy.ipynb` | The same sweep re-run at the project-standard configuration: 1000 clips, five models incl. `large-v3`, batch 8. Writes `scaling_results_1000.csv`; supersedes the original for cross-experiment comparisons |
 | `Figures.ipynb` | Redraws every figure as **vector PDF** from the stored per-condition CSVs. No GPU, no TIMIT, no decoding |
 | `Colab_ExperimentC.ipynb` | Localizes the penalty: teacher-forced ΔNLL, timestamp-margin pressure, and generated behaviour across the model ladder |
+| `Colab_Hallucinations.ipynb` | Classifies experiment A's stored hypotheses to count *hallucination prevalence* per model size. No GPU, no TIMIT, no decoding |
 
 `archive/` holds **discontinued** work — `Init_Play.ipynb` (five SSL encoders) and
 `Whisper_Play.ipynb` (10-file Whisper WER warm-up). Neither is being continued; do not extend them
@@ -321,6 +322,39 @@ scored at the same batch index and size. That is why `BATCH` is pinned rather th
 `path`/`speaker`/`region`), `expc_provenance.json`. Raw S/D/I counts and `n_ref_words` are kept per
 row so corpus WER stays re-poolable from the git-safe file alone; section 14 is a standalone reload
 that needs no GPU, no TIMIT and no earlier cells.
+
+## Counting hallucinations (`Colab_Hallucinations.ipynb`)
+
+WER cannot say whether a bad hypothesis is a hallucination: `WER = 1.4` is either forty words of
+loop against a ten-word reference, or ten wrong words plus four spurious ones. This notebook applies
+a text test to experiment A's stored hypotheses instead — **runaway** (`n_hyp >= 2 x n_ref`) or
+**loop** (an n-gram, `n <= 5`, repeated >= 3x consecutively), reported separately and swept over both
+thresholds, since the claim is the ordering across model size, not the level.
+
+It **decodes nothing**. Inputs are `delta_results_full.csv` (hypotheses, Drive-only) joined to
+`delta_per_utterance.csv` on `(model, path)`. Reading both is deliberate: taking `n_ref_words` from
+the numbers-only file is what removes the need for a TIMIT copy, and it carries the four WERs across
+so the text verdict can be cross-tabulated against the `WER > 1` proxy. It is the only notebook here
+that consumes hypothesis text and emits no text, so `halluc_per_utterance.csv` needs no Drive-only
+companion; it keeps `len_ratio` and `max_run` so the definition can be revisited without the text.
+
+Three things that are easy to get wrong:
+
+- **Normalize before tokenizing.** `EnglishTextNormalizer` strips punctuation, so
+  `Thank you. Thank you. Thank you.` becomes a clean 3-repetition of a bigram rather than three
+  distinct token sequences. It also keeps this notebook consistent with the WERs it compares against.
+- **`max_repeat_run` steps its outer loop by 1 and its repeat count by `n`.** Advancing by one *and*
+  counting overlapping matches scores `a b a b a b` as 4 repetitions rather than 3, because `[b a]`
+  at position 1 also matches at position 3; advancing only by `n` misses a loop that starts off-phase.
+  The function is unit-tested on exactly these cases.
+- **Assert no `<|` in `text`.** `Tokenizer.decode` drops ids at or above `<|endoftext|>` so timestamp
+  markers should never appear, but if they did they would inflate the length ratio *and* hand the
+  repeat detector a spurious periodic structure.
+
+Calibration against the proxy, measured locally on `base` from `offset_results.csv`: at 25 s with
+timestamps on, the text test flags 23/1000 and `WER > 1` flags 27, overlapping on 22. So the
+numbers-only file recovers ~96% of hallucinations and over-flags by ~5 — good enough for a scale
+trend, not for a headline count.
 
 ## Publication figures
 

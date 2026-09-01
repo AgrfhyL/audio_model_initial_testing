@@ -45,6 +45,7 @@ figs/
 !pe_wer_timestamps_off.png
 !expc_nll_vs_scale.png
 !expc_accounts.png
+!halluc_rate.png
 
 # --- offset experiment outputs (contain TIMIT reference transcripts: licensed) ---
 offset_manifest.json
