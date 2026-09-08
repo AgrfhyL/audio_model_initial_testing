@@ -46,6 +46,7 @@ figs/
 !expc_nll_vs_scale.png
 !expc_accounts.png
 !halluc_rate.png
+!halluc_taxonomy.png
 
 # --- offset experiment outputs (contain TIMIT reference transcripts: licensed) ---
 offset_manifest.json
@@ -54,6 +55,9 @@ transcribe_results.csv
 delta_results_full.csv
 pe_results_full.csv
 expc_results_full.csv
+# the hand-labelling sample from Colab_HallucinationTaxonomy.ipynb: carries both
+# reference and hypothesis text
+halluc_label_sample.csv
 
 # --- frozen corpus copy (TIMIT audio + transcripts: LDC93S1, not redistributable) ---
 corpus_frozen/

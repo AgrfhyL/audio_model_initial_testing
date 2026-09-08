@@ -24,6 +24,7 @@ redundancy is the design.
 | `Colab_ExperimentC.ipynb` | Localizes the penalty: teacher-forced ΔNLL, timestamp-margin pressure, and generated behaviour across the model ladder |
 | `Colab_Hallucinations.ipynb` | Classifies experiment A's stored hypotheses to count *hallucination prevalence* per model size. No GPU, no TIMIT, no decoding |
 | `Colab_EncoderSimilarity.ipynb` | Experiment H: reads the **encoder directly** — cosine/CKA between the utterance's frames at 5 s and 25 s, against a position floor. No decoding, no tokenizer, no references |
+| `Colab_HallucinationTaxonomy.ipynb` | Supersedes the counting notebook: a seven-way taxonomy over degeneracy, length pathology and **grounding**. No decoding, but needs TIMIT `.TXT` for the reference text |
 
 `archive/` holds **discontinued** work — `Init_Play.ipynb` (five SSL encoders) and
 `Whisper_Play.ipynb` (10-file Whisper WER warm-up). Neither is being continued; do not extend them
@@ -356,6 +357,53 @@ Calibration against the proxy, measured locally on `base` from `offset_results.c
 timestamps on, the text test flags 23/1000 and `WER > 1` flags 27, overlapping on 22. So the
 numbers-only file recovers ~96% of hallucinations and over-flags by ~5 — good enough for a scale
 trend, not for a headline count.
+
+## The taxonomy (`Colab_HallucinationTaxonomy.ipynb`)
+
+The counting notebook's two tests are both tests of **form** — is it too long, does it repeat.
+Neither asks whether the text is *about the audio*, so four failures pass untouched: canned
+boilerplate (`thank you for watching` is `len_ratio` 0.44 with nothing repeated), partial
+hallucination (9 correct + 6 invented is 1.67, under the 2.0 cut), drifting loops (exact n-gram
+equality never matches), and empty output (`n_hyp = 0` scores as clean). This notebook replaces the
+boolean with seven categories over three axes — degeneracy, length pathology, and **grounding**.
+
+`hallucination = degenerate ∪ runaway ∪ untethered`. `errorful` exists to hold *ordinary* bad
+transcription, which is what stops the hallucination count from being "high WER" under another name;
+`empty` and `truncated` are separate because they are real positional failures in the other
+direction. Categories are assigned in a **fixed priority order**, so a looping hypothesis that is
+also over-length counts once, as `degenerate`.
+
+Three measurements are new:
+
+- **`compression_ratio`** is imported from `whisper.utils`, not reimplemented — it is the exact
+  statistic `transcribe()` thresholds at `compression_ratio_threshold = 2.4`. zlib has a fixed
+  header cost, so short strings compress *worse* than they should: a normal 11-word TIMIT
+  hypothesis scores ~0.96, well under 2.4. It only becomes informative above roughly 60 words, which
+  makes it a complement to `max_run` on long output, not a replacement on short output.
+- **Fuzzy repeat matching** (`tol=1`) catches loops that drift as they run, and is gated to
+  `n >= 3` — at `n = 1` a one-token tolerance makes every word match every other. `MAX_N` also rose
+  5 → 10; a 7-gram loop repeated 3× previously scored `max_run = 1`. Exact and fuzzy runs are both
+  stored.
+- **`precision = hits / n_hyp`** comes from the same `jiwer` alignment that produces the WER —
+  deliberately not a bag-of-words overlap against a hand-written stopword list, which would be an
+  invented artifact with an indefensible threshold. `bag_overlap` is kept alongside as an
+  order-insensitive robustness check only. Direction separates the categories: `untethered` is low
+  precision *and* low recall; `runaway` is low precision with high recall, because the correct
+  transcript is usually still in there under the invented text.
+
+**It needs TIMIT**, unlike the counting notebook, because grounding cannot be computed without the
+reference text. Only the `.TXT` sidecars though — no audio, no `soundfile`, no corpus verification
+pass. Integrity comes instead from rebuilding the `reference_digest` that `Colab_DeltaSweep.ipynb`
+pinned in its provenance, which is both faster than re-verifying 1000 audio arrays and stricter: it
+proves these are the exact strings that produced the WERs being compared against.
+
+`old_halluc` reproduces the previous definition verbatim so the gain is measured rather than
+asserted. Outputs are `halluc_taxonomy.csv` (numbers only, git-safe, keeps every raw measurement so
+the taxonomy is re-cuttable without touching text again) and `halluc_label_sample.csv` — a
+~200-row stratified sample **carrying reference and hypothesis text**, Drive-only and gitignored,
+which is what turns the detector from a definition into a validated instrument. It stratifies by
+`(condition, category)` pooled over models: the detector never sees the model, so per-model strata
+would multiply the labelling cost by five without validating anything extra.
 
 ## Publication figures
 
