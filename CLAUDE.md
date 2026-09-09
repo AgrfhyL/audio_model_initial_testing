@@ -25,7 +25,7 @@ redundancy is the design.
 | `Colab_Hallucinations.ipynb` | Classifies experiment A's stored hypotheses to count *hallucination prevalence* per model size. No GPU, no TIMIT, no decoding |
 | `Colab_EncoderSimilarity.ipynb` | Experiment H: reads the **encoder directly** — cosine/CKA between the utterance's frames at 5 s and 25 s, against a position floor. No decoding, no tokenizer, no references |
 | `Colab_HallucinationTaxonomy.ipynb` | Supersedes the counting notebook: a seven-way taxonomy over degeneracy, length pathology and **grounding**. No decoding, but needs TIMIT `.TXT` for the reference text |
-| `Colab_LLMVerdict.ipynb` | The LLM arm (Atwany et al. 2025): two Claude judges classify the same 20 000 hypotheses, for an agreement check on the taxonomy. **The only notebook that sends reference text off the machine** |
+| `Colab_LLMVerdict.ipynb` | The LLM arm (Atwany et al. 2025): `gpt-4o-mini` classifies the same 20 000 hypotheses, for an agreement check on the taxonomy. **The only notebook that sends reference text off the machine** |
 
 `archive/` holds **discontinued** work — `Init_Play.ipynb` (five SSL encoders) and
 `Whisper_Play.ipynb` (10-file Whisper WER warm-up). Neither is being continued; do not extend them
@@ -410,15 +410,25 @@ would multiply the labelling cost by five without validating anything extra.
 
 A thresholded text detector and an LLM reading the reference/hypothesis pair are different
 paradigms, so agreement between them is evidence the scale trend is not an artifact of five
-hand-chosen thresholds. This notebook runs Atwany et al.'s (ACL Findings 2025) classifier — their
-Figure 5 prompt, transcribed verbatim — over the same 20 000 hypotheses and reports **HER**
-alongside the taxonomy's rate.
+hand-chosen thresholds. This notebook runs Atwany et al.'s (ACL Findings 2025) classifier over the
+same 20 000 hypotheses and reports **HER** alongside the taxonomy's rate.
 
-The number it exists to produce is in section 8. Atwany et al. report human–heuristic agreement of
-**0.00** against a threshold heuristic (cosine 0.2 + WER 30 + perplexity 200) — a different feature
-set from ours but the same kind of instrument. Raw agreement, Cohen's kappa, and positive-class
-Jaccard are all reported, because raw agreement alone is dominated by the ~98% of rows both methods
-call clean.
+**It is a replication, not an adaptation.** The judge is `gpt-4o-mini` — the model they used — with
+their Figure 5 prompt transcribed verbatim and `temperature=0.0`, the greedy decoding their section
+4.3 specifies. Model, prompt, and decoding all match. `JUDGES` is a list: one entry is the exact
+replication, a second computes cross-model agreement as well.
+
+There is exactly **one deviation**: `response_format` with a strict `json_schema` replaces the
+prompt's "produce only the classification" instruction. That constrains the output by construction
+rather than by asking, removing the parse step and foreclosing both a preamble and an
+off-vocabulary label. Their own section A.4.1 says they restricted output to the classification by
+prompt design anyway, so this is the same intent with a stronger mechanism.
+
+The number the notebook exists to produce is in section 8. Atwany et al. report human–heuristic
+agreement of **0.00** against a threshold heuristic (cosine 0.2 + WER 30 + perplexity 200) — a
+different feature set from ours but the same kind of instrument. Raw agreement, Cohen's kappa, and
+positive-class Jaccard are all reported, because raw agreement alone is dominated by the ~98% of
+rows both methods call clean.
 
 **Expect the `degenerate` row to disagree.** Atwany et al. classify repetition as *Oscillation
 Error*, an explicit **non**-hallucination; the taxonomy counts it as hallucination. That is a
@@ -427,36 +437,44 @@ a detector failure, and the per-category disagreement table is what makes it leg
 
 **This is the one notebook that sends reference text to a third party.** Classifying a hypothesis
 against its reference requires transmitting both, and the full-grid run sends all 1000 TIMIT
-references to the Anthropic API. That was a deliberate choice, recorded in `llm_provenance.json`
-under a `licensing` key so a later reader sees the decision rather than inferring it. Section 5 is
-gated behind an explicit `CONFIRM = True`; nothing leaves the runtime before it.
+references to the OpenAI API. That was a deliberate choice, recorded in `llm_provenance.json` under
+a `licensing` key so a later reader sees the decision rather than inferring it. Section 5 is gated
+behind an explicit `CONFIRM = True`; nothing leaves the runtime before it.
 
-Three deviations from the paper's setup, each for a stated reason:
+### Cost, and why the caching bar matters less here than it looks
 
-- **The prompt is split across the system/user boundary** — instructions and examples in `system`,
-  the pair in the user turn. Same text, same render order, but it makes the instruction block a
-  cacheable stable prefix. Without the split all 20 000 calls pay full input price for the same
-  ~800 tokens.
-- **`output_config.format` with an enum schema replaces "produce only the classification."** The
-  paper constrains output by asking; a schema constrains it by construction, removing the parse step
-  and foreclosing both a preamble and stray internal XML. Strictly better, not a departure.
-- **Only one arm can be greedy.** Their §4.3 specifies greedy decoding, but `temperature` is
-  rejected outright on Claude Opus 5 — so the `haiku-4-5` arm runs `temperature=0` and the Opus arm
-  cannot. That is a second reason to run two judges rather than one.
+`gpt-4o-mini` bills at $0.150/1M input and $0.600/1M output, halved by the Batch API. Measured with
+`tiktoken`, the instruction block is **654 tokens** and the whole 20 000-row grid comes to
+**about $1.07**.
 
-Cost control rests on three things, all measured in section 4 rather than assumed: the Batch API
-(50% off), prompt caching, and thinking disabled on the Opus arm (their GPT-4o-mini baseline had no
-thinking either, and output tokens are the expensive side). **The cache minimum is the detail that
-decides the bill** — 512 tokens on Claude Opus 5, 4096 on Haiku 4.5 — so the ~800-token instruction
-block caches on Opus and silently does not on Haiku, with no error either way. Section 4 measures
-the block with `count_tokens` and prints which arms will actually cache; section 6 reports the
-realised hit rate from the returned `usage` rather than trusting the projection.
+That 654 is below OpenAI's automatic-caching bar of **1024 tokens**, so the prompt does not cache —
+and the notebook deliberately does not pad it to clear the bar, because the saving is a fraction of
+a dollar and padding would mean no longer running the paper's prompt. Section 4 measures and reports
+this rather than assuming it; section 6 reads `prompt_tokens_details.cached_tokens` back from the
+response so the projection is checked against reality.
 
-Batch ids are persisted to `llm_batches.json` before the next chunk is submitted, and batches are
-durable server-side for 29 days — so a disconnected runtime costs nothing and re-running section 5
-submits only what is missing. Results arrive in arbitrary order and per-request failures are
-*values*, not exceptions (`result.type` of `errored`/`expired`), so section 6 keys by `custom_id`
-and asserts zero failures before anything downstream runs.
+Worth knowing while reading their paper: their App. A.4.1 rate card quotes "$0.075 per million
+input tokens", which is the **cached** rate, alongside "with most input tokens cached" — so their
+$78-per-million-segments figure assumes a near-perfect hit rate. Our projection uses the base rate
+and therefore reads slightly higher per row.
+
+**A subscription does not cover this.** Claude.ai and ChatGPT subscriptions bill separately from
+API usage; programmatic calls draw on API credits regardless of any plan. With `ANTHROPIC_API_KEY`
+set, even Claude Code bills at API rates and ignores the subscription entirely.
+
+### OpenAI Batch API specifics that are easy to get wrong
+
+- **It takes a JSONL file, not a request list.** One line per call with `custom_id`, `method`,
+  `url`, and `body`; uploaded via `client.files.create(..., purpose="batch")`, then referenced by
+  id. Ceilings are 50 000 requests and 200 MB per batch — 20 000 rows is roughly 66 MB, so
+  `CHUNK = 10000` stays inside both and gives two resume points.
+- **Failed requests are not in the output file.** They go to a separate `error_file_id`, so a batch
+  that silently dropped rows still yields a clean-looking output. Both files are read and the row
+  count asserted.
+- **Results are not in submission order** — everything keys off `custom_id`, which is the row's
+  index into the digest-verified `full`.
+- Batch ids are persisted to `llm_batches.json` before the next chunk is submitted, so a
+  disconnected runtime costs nothing and re-running section 5 submits only what is missing.
 
 ## Publication figures
 
