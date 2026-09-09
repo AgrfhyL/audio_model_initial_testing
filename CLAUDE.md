@@ -25,6 +25,7 @@ redundancy is the design.
 | `Colab_Hallucinations.ipynb` | Classifies experiment A's stored hypotheses to count *hallucination prevalence* per model size. No GPU, no TIMIT, no decoding |
 | `Colab_EncoderSimilarity.ipynb` | Experiment H: reads the **encoder directly** — cosine/CKA between the utterance's frames at 5 s and 25 s, against a position floor. No decoding, no tokenizer, no references |
 | `Colab_HallucinationTaxonomy.ipynb` | Supersedes the counting notebook: a seven-way taxonomy over degeneracy, length pathology and **grounding**. No decoding, but needs TIMIT `.TXT` for the reference text |
+| `Colab_LLMVerdict.ipynb` | The LLM arm (Atwany et al. 2025): two Claude judges classify the same 20 000 hypotheses, for an agreement check on the taxonomy. **The only notebook that sends reference text off the machine** |
 
 `archive/` holds **discontinued** work — `Init_Play.ipynb` (five SSL encoders) and
 `Whisper_Play.ipynb` (10-file Whisper WER warm-up). Neither is being continued; do not extend them
@@ -404,6 +405,58 @@ the taxonomy is re-cuttable without touching text again) and `halluc_label_sampl
 which is what turns the detector from a definition into a validated instrument. It stratifies by
 `(condition, category)` pooled over models: the detector never sees the model, so per-model strata
 would multiply the labelling cost by five without validating anything extra.
+
+## The LLM arm (`Colab_LLMVerdict.ipynb`)
+
+A thresholded text detector and an LLM reading the reference/hypothesis pair are different
+paradigms, so agreement between them is evidence the scale trend is not an artifact of five
+hand-chosen thresholds. This notebook runs Atwany et al.'s (ACL Findings 2025) classifier — their
+Figure 5 prompt, transcribed verbatim — over the same 20 000 hypotheses and reports **HER**
+alongside the taxonomy's rate.
+
+The number it exists to produce is in section 8. Atwany et al. report human–heuristic agreement of
+**0.00** against a threshold heuristic (cosine 0.2 + WER 30 + perplexity 200) — a different feature
+set from ours but the same kind of instrument. Raw agreement, Cohen's kappa, and positive-class
+Jaccard are all reported, because raw agreement alone is dominated by the ~98% of rows both methods
+call clean.
+
+**Expect the `degenerate` row to disagree.** Atwany et al. classify repetition as *Oscillation
+Error*, an explicit **non**-hallucination; the taxonomy counts it as hallucination. That is a
+definitional split in the literature (Jasiński et al. treat looping as a hallucination subtype), not
+a detector failure, and the per-category disagreement table is what makes it legible.
+
+**This is the one notebook that sends reference text to a third party.** Classifying a hypothesis
+against its reference requires transmitting both, and the full-grid run sends all 1000 TIMIT
+references to the Anthropic API. That was a deliberate choice, recorded in `llm_provenance.json`
+under a `licensing` key so a later reader sees the decision rather than inferring it. Section 5 is
+gated behind an explicit `CONFIRM = True`; nothing leaves the runtime before it.
+
+Three deviations from the paper's setup, each for a stated reason:
+
+- **The prompt is split across the system/user boundary** — instructions and examples in `system`,
+  the pair in the user turn. Same text, same render order, but it makes the instruction block a
+  cacheable stable prefix. Without the split all 20 000 calls pay full input price for the same
+  ~800 tokens.
+- **`output_config.format` with an enum schema replaces "produce only the classification."** The
+  paper constrains output by asking; a schema constrains it by construction, removing the parse step
+  and foreclosing both a preamble and stray internal XML. Strictly better, not a departure.
+- **Only one arm can be greedy.** Their §4.3 specifies greedy decoding, but `temperature` is
+  rejected outright on Claude Opus 5 — so the `haiku-4-5` arm runs `temperature=0` and the Opus arm
+  cannot. That is a second reason to run two judges rather than one.
+
+Cost control rests on three things, all measured in section 4 rather than assumed: the Batch API
+(50% off), prompt caching, and thinking disabled on the Opus arm (their GPT-4o-mini baseline had no
+thinking either, and output tokens are the expensive side). **The cache minimum is the detail that
+decides the bill** — 512 tokens on Claude Opus 5, 4096 on Haiku 4.5 — so the ~800-token instruction
+block caches on Opus and silently does not on Haiku, with no error either way. Section 4 measures
+the block with `count_tokens` and prints which arms will actually cache; section 6 reports the
+realised hit rate from the returned `usage` rather than trusting the projection.
+
+Batch ids are persisted to `llm_batches.json` before the next chunk is submitted, and batches are
+durable server-side for 29 days — so a disconnected runtime costs nothing and re-running section 5
+submits only what is missing. Results arrive in arbitrary order and per-request failures are
+*values*, not exceptions (`result.type` of `errored`/`expired`), so section 6 keys by `custom_id`
+and asserts zero failures before anything downstream runs.
 
 ## Publication figures
 
