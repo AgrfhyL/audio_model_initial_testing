@@ -25,7 +25,7 @@ redundancy is the design.
 | `Colab_Hallucinations.ipynb` | Classifies experiment A's stored hypotheses to count *hallucination prevalence* per model size. No GPU, no TIMIT, no decoding |
 | `Colab_EncoderSimilarity.ipynb` | Experiment H: reads the **encoder directly** — cosine/CKA between the utterance's frames at 5 s and 25 s, against a position floor. No decoding, no tokenizer, no references |
 | `Colab_HallucinationTaxonomy.ipynb` | Supersedes the counting notebook: a seven-way taxonomy over degeneracy, length pathology and **grounding**. No decoding, but needs TIMIT `.TXT` for the reference text |
-| `Colab_LLMVerdict.ipynb` | The LLM arm (Atwany et al. 2025): `gpt-4o-mini` classifies the same 20 000 hypotheses, for an agreement check on the taxonomy. **The only notebook that sends reference text off the machine** |
+| `Colab_LLMVerdict.ipynb` | The LLM arm (Atwany et al. 2025): `gpt-5.6-luna` + `gpt-4o-mini` classify the same 20 000 hypotheses, for an agreement check on the taxonomy. **The only notebook that sends reference text off the machine** |
 
 `archive/` holds **discontinued** work — `Init_Play.ipynb` (five SSL encoders) and
 `Whisper_Play.ipynb` (10-file Whisper WER warm-up). Neither is being continued; do not extend them
@@ -413,16 +413,32 @@ paradigms, so agreement between them is evidence the scale trend is not an artif
 hand-chosen thresholds. This notebook runs Atwany et al.'s (ACL Findings 2025) classifier over the
 same 20 000 hypotheses and reports **HER** alongside the taxonomy's rate.
 
-**It is a replication, not an adaptation.** The judge is `gpt-4o-mini` — the model they used — with
-their Figure 5 prompt transcribed verbatim and `temperature=0.0`, the greedy decoding their section
-4.3 specifies. Model, prompt, and decoding all match. `JUDGES` is a list: one entry is the exact
-replication, a second computes cross-model agreement as well.
+**Two judges, because they answer different questions.** `gpt-5.6-luna` (July 2026, nano-tier,
+built for high-volume classification) is the primary and the better classifier. `gpt-4o-mini` runs
+alongside it because it is the model Atwany et al. actually used, at the `temperature=0.0` greedy
+decoding their section 4.3 specifies — that arm is the replication, and the only one reproducible
+run to run. Together they also yield the cross-model agreement figure that mirrors their
+GPT-vs-Gemini number. `JUDGES` is a list; **if you cut to one, cut Luna, not `gpt-4o-mini`**, or the
+run loses its reproducible anchor.
 
-There is exactly **one deviation**: `response_format` with a strict `json_schema` replaces the
-prompt's "produce only the classification" instruction. That constrains the output by construction
-rather than by asking, removing the parse step and foreclosing both a preamble and an
-off-vocabulary label. Their own section A.4.1 says they restricted output to the classification by
-prompt design anyway, so this is the same intent with a stronger mechanism.
+Deviations from the paper, all recorded in the provenance:
+
+- **Both arms:** `response_format` with a strict `json_schema` replaces the prompt's "produce only
+  the classification". That constrains output by construction rather than by asking, removing the
+  parse step and foreclosing both a preamble and an off-vocabulary label. Their own section A.4.1
+  says they restricted output by prompt design anyway, so it is the same intent, stronger mechanism.
+- **Luna arm only:** no greedy decoding. GPT-5 family models reject `temperature` outright, so the
+  reproducibility their section 4.3 buys is unavailable there.
+- **Luna arm only:** `reasoning_effort="none"`. This is the faithful setting, not merely the cheap
+  one — their section A.4.1 explicitly avoids chain-of-thought generation "that could introduce
+  errors", and turning reasoning off expresses that same decision as a parameter.
+
+### The two request shapes are not interchangeable
+
+`body_for` dispatches on model family, and mixing the shapes is a **400, not a warning**: reasoning
+models reject `temperature` and require `max_completion_tokens`, where the older chat models want
+`max_tokens` and accept `temperature`. The dispatch is a prefix match over `gpt-5`/`gpt-6`/`o1`/
+`o3`/`o4`, so adding another judge from either family needs no new code.
 
 The number the notebook exists to produce is in section 8. Atwany et al. report human–heuristic
 agreement of **0.00** against a threshold heuristic (cosine 0.2 + WER 30 + perplexity 200) — a
@@ -443,20 +459,27 @@ behind an explicit `CONFIRM = True`; nothing leaves the runtime before it.
 
 ### Cost, and why the caching bar matters less here than it looks
 
-`gpt-4o-mini` bills at $0.150/1M input and $0.600/1M output, halved by the Batch API. Measured with
-`tiktoken`, the instruction block is **654 tokens** and the whole 20 000-row grid comes to
-**about $1.07**.
+`gpt-5.6-luna` bills at $0.20/1M input and $1.20/1M output; `gpt-4o-mini` at $0.150/$0.600. Both
+halve under the Batch API. Measured with `tiktoken`, the instruction block is **654 tokens** and the
+full 20 000-row grid costs **about $1.48 on Luna, $1.07 on `gpt-4o-mini`, $2.55 for both**.
 
 That 654 is below OpenAI's automatic-caching bar of **1024 tokens**, so the prompt does not cache —
 and the notebook deliberately does not pad it to clear the bar, because the saving is a fraction of
 a dollar and padding would mean no longer running the paper's prompt. Section 4 measures and reports
-this rather than assuming it; section 6 reads `prompt_tokens_details.cached_tokens` back from the
-response so the projection is checked against reality.
+this rather than assuming it; section 6 reads `cached_tokens` back so the projection is checked
+against reality.
+
+**On the Luna arm the line to watch is output, not input.** Reasoning tokens bill at the output
+rate, so a reasoning model left at default effort can spend hundreds of billed tokens on a three-way
+classification — an order of magnitude past the ~12 the label costs. `reasoning_effort="none"` is
+what holds the projection, and section 6 **asserts** fewer than 5 reasoning tokens per row rather
+than trusting the parameter: if it silently fails to take effect the run still succeeds, just at
+several times the projected cost.
 
 Worth knowing while reading their paper: their App. A.4.1 rate card quotes "$0.075 per million
 input tokens", which is the **cached** rate, alongside "with most input tokens cached" — so their
-$78-per-million-segments figure assumes a near-perfect hit rate. Our projection uses the base rate
-and therefore reads slightly higher per row.
+$78-per-million-segments figure assumes a near-perfect hit rate. Our projection uses base rates and
+therefore reads slightly higher per row.
 
 **A subscription does not cover this.** Claude.ai and ChatGPT subscriptions bill separately from
 API usage; programmatic calls draw on API credits regardless of any plan. With `ANTHROPIC_API_KEY`
