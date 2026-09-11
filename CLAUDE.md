@@ -522,15 +522,45 @@ Every experiment notebook writes PNG at 160 dpi, sized for a notebook cell — t
 a paper. `Figures.ipynb` redraws them as **vector PDF** at ACL column widths (3.15 in single,
 6.30 in full) from the numbers-only files each sweep leaves on Drive, so nothing is decoded again:
 
-| source | file |
+| figure (`figures/<stem>.pdf`) | source file |
 |---|---|
-| O scaling | `scaling_per_condition.csv` |
-| A delta sweep | `delta_per_utterance.csv` |
-| B positional embedding | `pe_per_condition.csv` |
-| C localization | `expc_per_utterance.csv` |
+| `wer_vs_offset` | `scaling_per_condition.csv` |
+| `delta_by_model` | `delta_per_utterance.csv` (+ `delta_provenance.json` if present) |
+| `encoder_cka` | `encsim_per_utterance.csv` |
+| `cka_by_depth` | `encsim_per_layer.csv` |
+| `localization` | `expc_per_utterance.csv` |
+| `positional_embedding` | `pe_per_condition.csv` |
 
-Missing files are skipped with a notice, so it runs usefully before every sweep has finished. It
-also emits the two `booktabs` tables.
+It also emits the two `booktabs` tables.
+
+**Sections 1 and 2 are the only shared state; every figure section is independent.** §1 is data and
+mechanics, §2 is every visual knob. A section is `rows = need("x.csv")` … `finish(fig, "stem")`, so
+a new figure is added without touching or re-running any other section. `need()` returns `None` and
+prints a notice for a sweep that has not run — it never raises, so the notebook stays runnable
+before the grid is complete. `load()` caches; call `reload()` after pulling fresh CSVs off Drive.
+`cached_ci()` memoizes the clustered BCa bootstrap, which is ~10 s of pure Python per model and
+would otherwise be re-paid on every style tweak.
+
+`finish()` writes the PDF and PNG **and verifies the PDF in the same call**, so one section run on
+its own still proves its own output. Section 10 globs `figures/` rather than tracking writes in a
+global, for the same reason. The verification inflates the Flate streams first: matplotlib
+compresses its object streams, so a byte-level grep for `/Type3` or `/FontFile2` passes on every
+file and checks nothing.
+
+Locally the notebook reads `$NAACL_DATA`, else `data/` if it exists, else the working directory —
+`data/` is gitignored, so downloaded sweep outputs cannot be committed by accident.
+
+### House style (stated 2026-09-10; applies to figures added later)
+
+1. **No checkpoint parameter counts.** Checkpoints are named (`tiny` … `large-v3`), never sized —
+   no `39M` under a tick, no parameter-count axis.
+2. **No titles**, on the figure or the axes. Where two panels must be told apart they carry an
+   inset `(a)` / `(b)` label via `panel()`; the caption carries everything else.
+3. **Vector PDF**, verified in `finish()`.
+4. **Axis labels of at most three words** — `offset (s)`, `corpus WER`, `relative depth`, `CKA`.
+5. Boxed axes (all four spines), a light grid, frameless legends, STIX serif to sit with the ACL
+   template's Times, and one colour *and* dash pattern per model so the ladder survives greyscale
+   printing. `series()` applies the pair.
 
 `pdf.fonttype = 42` is not optional — matplotlib's default Type 3 embedding is rejected by arXiv's
 checker and by some venues. Set the figure to its final print width here rather than rescaling with
@@ -539,6 +569,10 @@ checker and by some venues. Set the figure to its final print width here rather 
 Note the scaling sweep originally had **no** numbers-only output at all — its WER existed only in
 printed cell output — so `Colab_ModelScaling copy.ipynb` now writes `scaling_per_condition.csv`
 with pooled S/D/I per (model, offset, arm), asserted to reproduce `corpus_wer` from the counts.
+
+`encoder_cka` deliberately omits the silence **position floor**. It is the control for the raw
+cosine, which is dominated by "this is a different window position"; CKA is not, and drawing the
+floor on a CKA axis invites it to be read as a baseline for a metric it is not a baseline for.
 
 ## Frozen corpus
 
