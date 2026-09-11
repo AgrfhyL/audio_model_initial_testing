@@ -570,6 +570,14 @@ Note the scaling sweep originally had **no** numbers-only output at all — its 
 printed cell output — so `Colab_ModelScaling copy.ipynb` now writes `scaling_per_condition.csv`
 with pooled S/D/I per (model, offset, arm), asserted to reproduce `corpus_wer` from the counts.
 
+The delta figure re-derives the speaker-clustered BCa interval and asserts it against
+`delta_provenance.json`. That check cannot be written as an equality: the sweep bootstrapped
+**unrounded** floats, while `delta_per_utterance.csv` stores `delta_m` at `:.6f`, so recomputing
+from the CSV lands a few times `1e-9` away. The tolerance is one unit in the CSV's last stored
+place (`1e-6`), which still fires on the mistake the check exists to catch — reading `mean_ci_lo`,
+the utterance-level interval, sits ~3e-3 away. An earlier `1e-9` tolerance failed the whole cell on
+a run where the numbers were in fact correct.
+
 `encoder_cka` deliberately omits the silence **position floor**. It is the control for the raw
 cosine, which is dominated by "this is a different window position"; CKA is not, and drawing the
 floor on a CKA axis invites it to be read as a baseline for a metric it is not a baseline for.
