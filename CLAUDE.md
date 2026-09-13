@@ -25,7 +25,7 @@ redundancy is the design.
 | `Colab_Hallucinations.ipynb` | Classifies experiment A's stored hypotheses to count *hallucination prevalence* per model size. No GPU, no TIMIT, no decoding |
 | `Colab_EncoderSimilarity.ipynb` | Experiment H: reads the **encoder directly** — cosine/CKA between the utterance's frames at 5 s and 25 s, against a position floor. No decoding, no tokenizer, no references |
 | `Colab_HallucinationTaxonomy.ipynb` | Supersedes the counting notebook: a seven-way taxonomy over degeneracy, length pathology and **grounding**. No decoding, but needs TIMIT `.TXT` for the reference text |
-| `Colab_LLMVerdict.ipynb` | The LLM arm (Atwany et al. 2025): `gpt-5.6-luna` classifies the same 20 000 hypotheses, for an agreement check on the taxonomy. Submit / collect / analyse phases; raw responses saved to Drive, so analysis never calls the API. **The only notebook that sends reference text off the machine** |
+| `Colab_LLMVerdict.ipynb` | **The project's hallucination detector** (Atwany et al. 2025, fine-grained prompt): `gpt-5.6-luna` labels the 20 000 hypotheses, and looping counts as hallucination. Submit / collect / analyse phases; raw responses saved to Drive, so analysis never calls the API. **The only notebook that sends reference text off the machine** |
 
 `archive/` holds **discontinued** work — `Init_Play.ipynb` (five SSL encoders) and
 `Whisper_Play.ipynb` (10-file Whisper WER warm-up). Neither is being continued; do not extend them
@@ -408,13 +408,35 @@ would multiply the labelling cost by five without validating anything extra.
 
 ## The LLM arm (`Colab_LLMVerdict.ipynb`)
 
-A thresholded text detector and an LLM reading the reference/hypothesis pair are different
-paradigms, so agreement between them is evidence the scale trend is not an artifact of five
-hand-chosen thresholds. This notebook runs Atwany et al.'s (ACL Findings 2025) classifier over the
-same 20 000 hypotheses and reports **HER** alongside the taxonomy's rate.
+**The project's hallucination detector** — the author uses this notebook exclusively for detection;
+the taxonomy notebook is at most an optional comparison. It runs Atwany et al.'s (ACL Findings 2025)
+LLM classifier over the delta sweep's 20 000 hypotheses. **The judge is `gpt-5.6-luna`** (July 2026,
+nano-tier), given their **Figure 6 fine-grained prompt** verbatim.
 
-**The judge is `gpt-5.6-luna`** (July 2026, nano-tier, built for high-volume classification), with
-Atwany et al.'s Figure 5 prompt verbatim.
+### What counts as hallucination
+
+`HALLUCINATION_LABELS = {"Hallucination Error", "Oscillation Error"}` in §1 — fabrication **and
+looping**. The two sources are easy to swap, so precisely: **Atwany et al. do not count loops** (they
+file repetition under *Oscillation Error*, a non-hallucination class, and their HER counts
+Hallucination Error only); **Jasiński et al. do** (HALAS labels "hallucinations containing looping,
+i.e. repeated phrases"). The project follows Jasiński et al.
+
+- The definition is applied to **stored labels at analysis time** and is deliberately not in `CONFIG`
+  (it changes no verdict), so redefining never needs a new run. `verdict_per_utterance.csv` keeps the
+  full five-way label beside the `halluc` flag.
+- §8 prints each counted label's share per cell; its Hallucination Error column *is* Atwany et al.'s
+  HER, so the paper-comparable and project numbers come from one run.
+- **The coarse prompt (Figure 5) cannot express this definition** — it merges oscillation into
+  Non-Hallucination Error at classification time, irrecoverably. §3 asserts
+  `HALLUCINATION_LABELS ⊆ LABELS` before anything is built or sent; §7 re-checks every run it loads.
+- The Figure 6 text was once **truncated** in this notebook (no examples, no format blocks, no
+  sub-bullets) while described as verbatim. Both prompts are now checked against the PDF text by a
+  whitespace-normalized diff; the only residual differences are one space each (`-Phonetic`,
+  `Task:Classify`), consistent with PDF extraction. Re-run that diff after any edit to either prompt.
+
+`halluc_taxonomy.csv` is **optional**. §7 derives speaker and region from the TIMIT path
+(`DR4/FADG0/SX289.WAV`); agreement, the per-category table and the taxonomy series in the figure
+appear only when the file is on Drive.
 
 ### Pay once, analyse forever: three phases
 
@@ -491,14 +513,15 @@ dispatches on a `gpt-5`/`gpt-6`/`o1`/`o3`/`o4` prefix.
 
 ### Reading the results
 
-§9 is the number the notebook exists for. Atwany et al. report human–heuristic agreement of **0.00**
-against a threshold heuristic (cosine 0.2 + WER 30 + perplexity 200). Raw agreement, Cohen's kappa
-and positive-class Jaccard are all reported, because raw agreement is dominated by the ~98% both
-methods call clean. **Expect `degenerate` to disagree**: Atwany et al. classify repetition as
-*Oscillation Error*, a non-hallucination; the taxonomy counts it as hallucination (as Jasiński et al.
-do). That is a definitional split, not a detector failure.
+§8 (rate + label composition) is the headline. §9 does work only with a second source — another run
+in `ANALYSE`, or the taxonomy file — and then reports raw agreement, Cohen's kappa and positive-class
+Jaccard (raw agreement alone is dominated by rows both call clean). Against the taxonomy, Atwany et
+al.'s human–heuristic agreement of **0.00** is the reference point. With loops counted on both sides,
+the taxonomy's `degenerate` rows should mostly agree; disagreement there means the judge read a loop
+as something else (typically Language Error).
 
-§11 draws in the `Figures.ipynb` house style and verifies the PDF by inflating its streams.
+§11 writes `llm_halluc_rate.pdf/.png` in the `Figures.ipynb` house style and verifies the PDF by
+inflating its streams.
 
 ### Licensing
 
@@ -511,18 +534,18 @@ only.
 
 ### Cost
 
-$0.20/1M input, $1.20/1M output, halved by the Batch API. The instruction block is **654 tokens**
-(`o200k_base`); the user turn measured over the 12 000 locally available `base` rows averages
-**28 tokens** (p99 43); chat framing and schema add ~30 (estimated). §4 measures the user turn over
-every row rather than one example.
+$0.20/1M input, $1.20/1M output, halved by the Batch API. The Figure 6 instruction block is
+**705 tokens** (`o200k_base`; Figure 5 is 654); the user turn measured over the 12 000 locally
+available `base` rows averages **28 tokens** (p99 43); chat framing and schema add ~30 (estimated).
+§4 measures the user turn over every row rather than one example.
 
-| reasoning tokens / row | batch-discounted total |
+| reasoning tokens / row | batch-discounted total (fine prompt) |
 |---|---|
-| 0 (`effort="none"`) | **$1.57** |
-| 50 | $2.17 |
-| 200 | $3.97 |
-| 500 | $7.57 |
-| 1000 | $13.57 |
+| 0 (`effort="none"`) | **$1.67** |
+| 50 | $2.27 |
+| 200 | $4.07 |
+| 500 | $7.67 |
+| 1000 | $13.67 |
 
 It is a sweep, not a prediction — there is no measured reasoning figure for this prompt above `none`.
 §7 prints observed reasoning tokens and the realised cost. Input is bounded: every hypothesis at
@@ -541,8 +564,9 @@ with `ANTHROPIC_API_KEY` set all bill API calls separately).
   §5 resubmit the rest.
 
 The notebook has been exercised end-to-end only against a **mocked** OpenAI client with synthetic
-text (crash-and-adopt, partial failure and retry, config drift, analysis with network blocked and
-`openai` unimportable, no text in printed output or git-safe files) — never against the live API.
+text (crash-and-adopt, partial failure and retry, config drift, coarse grain refused, analysis with
+and without the taxonomy file while network is blocked and `openai` is unimportable, no text in
+printed output or git-safe files) — never against the live API.
 
 ## Publication figures
 
