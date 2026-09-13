@@ -497,8 +497,10 @@ and the figure all extend to every listed run, so two effort levels compare with
 - **Unrecorded batches are adopted, not resubmitted.** Each batch carries `metadata={"run", "k",
   "rows"}` (rows = 32-hex digest of its row list). If the runtime dies between `batches.create` and
   the Drive write of `run.json` — including a write stuck in the FUSE buffer — the next §5 finds the
-  tagged batch via `batches.list` and records it. Metadata limits: 16 pairs, keys ≤ 64 chars, values
-  ≤ 512.
+  tagged batch via `batches.list` and records it. Its rows are read back from its own
+  `requests_<k>.jsonl` on Drive (written before the upload) and checked against the tag, so adoption
+  does not depend on this session's token packing choosing the same rows. Metadata limits: 16 pairs,
+  keys ≤ 64 chars, values ≤ 512.
 - Row status is one of `ok`, `truncated` (empty content — reasoning spent the budget), `refusal`
   (structured outputs put this in `message.refusal`, not `content`), `invalid`, `error`, `missing`.
   When a row appears in several batches, `ok` beats a failure and later beats earlier; `billed` usage
@@ -540,8 +542,8 @@ inflating its streams.
 1000 TIMIT references to the OpenAI API — a deliberate choice, recorded under `licensing` in
 `run.json` and carried into `provenance.json`. §5 is gated behind `CONFIRM = True`. §6's
 `DELETE_REMOTE = True` removes the run's input/output files from OpenAI once the Drive copies verify.
-Nothing prints text: output and errors are counted, batch rejections print codes and line numbers
-only.
+Nothing prints text: output and errors are counted, and batch rejections print codes plus, for
+`token_limit_exceeded`, the limit number parsed out of the message — never the message itself.
 
 ### Cost
 
@@ -568,16 +570,32 @@ with `ANTHROPIC_API_KEY` set all bill API calls separately).
 ### Batch API specifics that are easy to get wrong
 
 - It takes an uploaded JSONL file (`purpose="batch"`), one call per line with `custom_id`, `method`,
-  `url`, `body`; ceilings 50 000 requests / 200 MB. 20 000 rows ≈ 66 MB, so `CHUNK = 10000`.
+  `url`, `body`; ceilings 50 000 requests / 200 MB. Measured: 10 000 rows = 42 MB.
+- **The binding limit is the batch *queue*, not the batch.** OpenAI caps input tokens *enqueued across
+  all in-flight batches* per model per organization (limits page: "Batch queue limit"). Exceeding it
+  fails the batch at validation with `token_limit_exceeded` — no output, no error file, not billed —
+  and the batch still reaches a terminal state, so "every batch collected" does not mean "every row
+  classified". The first live submission hit exactly this: two 10 000-row batches (~7.6 M tokens each)
+  sent back to back, both rejected, and the old §6 reported success. §5 now packs by §4's per-row token
+  counts to `QUEUE_FILL` (0.8) of the limit minus what is in flight, and with `WAIT_FOR_QUEUE` keeps
+  submitting as batches finish. The limit is the lower of `QUEUE_LIMIT` and the number OpenAI stated
+  in an earlier rejection of this run (parsed from the stored `batch_<k>.json`), else
+  `QUEUE_FALLBACK`. A batch still rejected after packing stops §5 rather than retrying into it.
 - **Failed requests are not in the output file** — they go to `error_file_id`.
 - **Results are not in submission order** — key on `custom_id` (`r<i>`, `i` indexes `index.csv`).
 - **Expired/cancelled batches still return completed results** (and bill them); download them and let
   §5 resubmit the rest.
 
-The notebook has been exercised end-to-end only against a **mocked** OpenAI client with synthetic
-text (crash-and-adopt, partial failure and retry, config drift, coarse grain refused, analysis with
-and without the taxonomy file while network is blocked and `openai` is unimportable, no text in
-printed output or git-safe files) — never against the live API.
+The notebook was first built against a **mocked** OpenAI client with synthetic text (crash-and-adopt,
+partial failure and retry, config drift, coarse grain refused, analysis with and without the taxonomy
+file while network is blocked and `openai` is unimportable, no text in printed output or git-safe
+files). That mock had no queue limit, which is why the first live run failed on one. The queue
+handling was then tested against a mock that enforces an enqueued-token limit and counts 8% more
+tokens than tiktoken: replaying the failed live run with the original cells reproduced its output
+line for line, and the fixed cells recovered it, stopped after a single bounce when the limit was set
+too high, adopted a batch orphaned mid-submit without sending any row twice, and completed by hand
+with `WAIT_FOR_QUEUE = False`. **The rejection message format (`Limit: N enqueued tokens`) is assumed,
+not observed** — if it differs, no number is parsed and §5 falls back to `QUEUE_FALLBACK`.
 
 ## Publication figures
 
