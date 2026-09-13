@@ -398,6 +398,11 @@ pass. Integrity comes instead from rebuilding the `reference_digest` that `Colab
 pinned in its provenance, which is both faster than re-verifying 1000 audio arrays and stricter: it
 proves these are the exact strings that produced the WERs being compared against.
 
+**Caveat (found 2026-09-13): that check has never actually run.** The notebook looks for a key named
+`reference_digest`, but the sweep writes `corpus.reference_digest_sha256`, so it prints a "cannot
+verify the pin" notice, carries on, and records `reference_digest_verified: false`. Not yet fixed
+there; `Colab_LLMVerdict.ipynb` reads the right key.
+
 `old_halluc` reproduces the previous definition verbatim so the gain is measured rather than
 asserted. Outputs are `halluc_taxonomy.csv` (numbers only, git-safe, keeps every raw measurement so
 the taxonomy is re-cuttable without touching text again) and `halluc_label_sample.csv` — a
