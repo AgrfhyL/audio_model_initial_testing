@@ -25,7 +25,7 @@ redundancy is the design.
 | `Colab_Hallucinations.ipynb` | Classifies experiment A's stored hypotheses to count *hallucination prevalence* per model size. No GPU, no TIMIT, no decoding |
 | `Colab_EncoderSimilarity.ipynb` | Experiment H: reads the **encoder directly** — cosine/CKA between the utterance's frames at 5 s and 25 s, against a position floor. No decoding, no tokenizer, no references |
 | `Colab_HallucinationTaxonomy.ipynb` | Supersedes the counting notebook: a seven-way taxonomy over degeneracy, length pathology and **grounding**. No decoding, but needs TIMIT `.TXT` for the reference text |
-| `Colab_LLMVerdict.ipynb` | The LLM arm (Atwany et al. 2025): `gpt-5.6-luna` classifies the same 20 000 hypotheses, for an agreement check on the taxonomy. **The only notebook that sends reference text off the machine** |
+| `Colab_LLMVerdict.ipynb` | The LLM arm (Atwany et al. 2025): `gpt-5.6-luna` classifies the same 20 000 hypotheses, for an agreement check on the taxonomy. Submit / collect / analyse phases; raw responses saved to Drive, so analysis never calls the API. **The only notebook that sends reference text off the machine** |
 
 `archive/` holds **discontinued** work — `Init_Play.ipynb` (five SSL encoders) and
 `Whisper_Play.ipynb` (10-file Whisper WER warm-up). Neither is being continued; do not extend them
@@ -414,107 +414,135 @@ hand-chosen thresholds. This notebook runs Atwany et al.'s (ACL Findings 2025) c
 same 20 000 hypotheses and reports **HER** alongside the taxonomy's rate.
 
 **The judge is `gpt-5.6-luna`** (July 2026, nano-tier, built for high-volume classification), with
-Atwany et al.'s Figure 5 prompt verbatim. `JUDGES` is a list — adding `"gpt-4o-mini"` gives a second
-arm and a cross-model agreement figure, but the single-judge configuration is the shipped default.
+Atwany et al.'s Figure 5 prompt verbatim.
 
-**`REASONING_EFFORT` in the config cell is the knob.** Valid: `none`, `low`, `medium` (API default),
-`high`, `xhigh`, `max`. It is a plain module-level constant, asserted against that set at import, so
-editing one line reconfigures the run. `none` ships as the default because it matches the paper —
-their section A.4.1 explicitly avoids chain-of-thought "that could introduce errors" — and because
-reasoning tokens bill at the **output** rate on a job whose answer is twelve tokens long.
+### Pay once, analyse forever: three phases
 
-**`MAX_TOKENS` is derived from the knob, not fixed.** `max_completion_tokens` caps reasoning *and*
-the answer together, so a ceiling sized for a twelve-token label starves any non-`none` effort and
-returns empty content. It scales to 8192 whenever reasoning is on; that costs nothing, since the
-ceiling is not a reservation and unused headroom is never billed. Section 6 asserts on empty
-responses and names this as the cause.
+| phase | run | needs | API |
+|---|---|---|---|
+| submit | §1 → §5 | key, TIMIT `.TXT`, delta sweep files | §5, **the only billed call** |
+| collect | §1 → §6 | key | polling + downloads, not billed |
+| analyse | §1 → §7–§12 | Drive files only | **never** |
 
-Deviations from the paper, all recorded in the provenance:
+**§1 imports nothing that needs a key.** `connect()` in the helpers cell installs `openai` and reads
+the key lazily, and only §5/§6 call it — so the analysis phase runs in a fresh runtime (or locally,
+via `$NAACL_DATA` / `data/`) with no key, no `openai`, no TIMIT and no network. Do not move auth back
+into §1 or make an analysis cell depend on `full`/`REF`/`HYP`/`client`; that is what the split exists
+to prevent.
 
-- **`response_format`** with a strict `json_schema` replaces the prompt's "produce only the
-  classification". That constrains output by construction rather than by asking, removing the parse
-  step and foreclosing both a preamble and an off-vocabulary label. Their own section A.4.1 says
-  they restricted output by prompt design anyway — same intent, stronger mechanism.
-- **No greedy decoding.** GPT-5 family models reject `temperature` outright, so the reproducibility
-  their section 4.3 buys is unavailable. **`llm_verdict_per_utterance.csv` is therefore the record
-  of the run that happened, not a re-derivable function of its inputs** — keep the file, do not plan
-  to regenerate it, and say so in any write-up. Adding `"gpt-4o-mini"` to `JUDGES` restores a
-  reproducible arm if that becomes necessary.
-- **`reasoning_effort`** is a parameter the paper had no equivalent for; at `none` it expresses
-  their no-chain-of-thought decision, and at any other level it is a deliberate departure.
+**The raw responses are the record.** §6 writes the Batch object, `output_*.jsonl` and
+`errors_*.jsonl` to Drive byte-for-byte *before* anything parses them, reads each back, and records
+its SHA-256 in `run.json`; `parse_run()` re-checks those digests on every read. Everything from §7 on
+re-derives from those files. This is not optional hygiene: **OpenAI deletes a batch's output file
+30 days after completion**, and GPT-5 models have no greedy decoding, so a re-run would neither be
+free nor reproduce the verdicts.
 
-### Request shape is family-dependent
+### Run folders
 
-`body_for` dispatches on model family, and mixing the shapes is a **400, not a warning**: reasoning
-models reject `temperature` and require `max_completion_tokens`, where the older chat models want
-`max_tokens` and accept `temperature`. The dispatch is a prefix match over `gpt-5`/`gpt-6`/`o1`/
-`o3`/`o4`, so a second judge from either family needs no new code.
+`MyDrive/NAACL/llm_runs/<judge>.<grain>.effort-<level>/` (`.greedy` for non-reasoning judges) — one
+folder per configuration that can change a verdict, so turning the knob starts a new run beside the
+old one instead of overwriting it. Contents: `run.json` (config incl. full prompt text, input
+digests, licensing decision, every batch with its rows and file digests), `index.csv`
+(`custom_id` → model/path/offset/arm, which is what frees collection and analysis from TIMIT),
+`requests_*.jsonl` (exact uploaded bytes — **carry reference text**), `batch_*.json`, `output_*`,
+`errors_*`, and the derived `verdict_per_utterance.csv` + `provenance.json` written by §10.
+`llm_runs/` is gitignored because of the request files.
 
-The number the notebook exists to produce is in section 8. Atwany et al. report human–heuristic
-agreement of **0.00** against a threshold heuristic (cosine 0.2 + WER 30 + perplexity 200) — a
-different feature set from ours but the same kind of instrument. Raw agreement, Cohen's kappa, and
-positive-class Jaccard are all reported, because raw agreement alone is dominated by the ~98% of
-rows both methods call clean.
+§5 **refuses to add batches to a folder whose recorded `CONFIG` or input digests differ** —
+`CONFIG` covers judge, grain/labels, effort, temperature, prompt digest, user template, schema and
+endpoint. `max_tokens` is recorded per batch instead, so a truncation retry at a larger budget is
+allowed.
 
-**Expect the `degenerate` row to disagree.** Atwany et al. classify repetition as *Oscillation
-Error*, an explicit **non**-hallucination; the taxonomy counts it as hallucination. That is a
-definitional split in the literature (Jasiński et al. treat looping as a hallucination subtype), not
-a detector failure, and the per-category disagreement table is what makes it legible.
+`ANALYSE` in §7 lists run folders to analyse together; HER, agreement pairs, the per-category table
+and the figure all extend to every listed run, so two effort levels compare with no API call.
 
-**This is the one notebook that sends reference text to a third party.** Classifying a hypothesis
-against its reference requires transmitting both, and the full-grid run sends all 1000 TIMIT
-references to the OpenAI API. That was a deliberate choice, recorded in `llm_provenance.json` under
-a `licensing` key so a later reader sees the decision rather than inferring it. Section 5 is gated
-behind an explicit `CONFIRM = True`; nothing leaves the runtime before it.
+### Never paying twice
 
-### Cost, and why the caching bar matters less here than it looks
+- **§5 submits only rows without an `ok` verdict that are not in flight.** After a partial failure it
+  sends just those rows as a new batch. §7 stops with the count and this remedy rather than analysing
+  an incomplete grid.
+- **Unrecorded batches are adopted, not resubmitted.** Each batch carries `metadata={"run", "k",
+  "rows"}` (rows = 32-hex digest of its row list). If the runtime dies between `batches.create` and
+  the Drive write of `run.json` — including a write stuck in the FUSE buffer — the next §5 finds the
+  tagged batch via `batches.list` and records it. Metadata limits: 16 pairs, keys ≤ 64 chars, values
+  ≤ 512.
+- Row status is one of `ok`, `truncated` (empty content — reasoning spent the budget), `refusal`
+  (structured outputs put this in `message.refusal`, not `content`), `invalid`, `error`, `missing`.
+  When a row appears in several batches, `ok` beats a failure and later beats earlier; `billed` usage
+  sums every response, retried ones included.
 
-`gpt-5.6-luna` bills at $0.20/1M input and $1.20/1M output, halved by the Batch API. Measured with
-`tiktoken`, the instruction block is **654 tokens**, so input is fixed at roughly $0.67 for the grid
-whatever else changes.
+### The knob, and deviations from the paper
 
-**Output is the line that moves, and `REASONING_EFFORT` decides it.** Reasoning tokens bill at the
-output rate, so cost is a function of the knob:
+**`REASONING_EFFORT` in §1** — `none`, `low`, `medium` (API default), `high`, `xhigh`, `max`.
+`none` ships because it matches the paper (their §A.4.1 avoids chain-of-thought "that could
+introduce errors") and because reasoning tokens bill at the **output** rate on a twelve-token
+answer. **`MAX_TOKENS` is derived from it** (64 at `none`, 8192 otherwise): `max_completion_tokens`
+caps reasoning *and* the answer, so a label-sized ceiling starves any other level; unused headroom is
+never billed. §7 *warns* (does not assert — the run is already paid for) when `effort="none"` still
+shows ≥ 5 reasoning tokens per row.
+
+Deviations, recorded in each `provenance.json`: strict `json_schema` `response_format` replaces the
+prompt's "produce only the classification"; no greedy decoding (GPT-5 family rejects
+`temperature`); and `reasoning_effort` itself. `JUDGE = "gpt-4o-mini"` gives a separate greedy run.
+
+**Request shape is family-dependent** and mixing the shapes is a **400**: reasoning models reject
+`temperature` and require `max_completion_tokens`; older chat models want `max_tokens`. `body_for`
+dispatches on a `gpt-5`/`gpt-6`/`o1`/`o3`/`o4` prefix.
+
+### Reading the results
+
+§9 is the number the notebook exists for. Atwany et al. report human–heuristic agreement of **0.00**
+against a threshold heuristic (cosine 0.2 + WER 30 + perplexity 200). Raw agreement, Cohen's kappa
+and positive-class Jaccard are all reported, because raw agreement is dominated by the ~98% both
+methods call clean. **Expect `degenerate` to disagree**: Atwany et al. classify repetition as
+*Oscillation Error*, a non-hallucination; the taxonomy counts it as hallucination (as Jasiński et al.
+do). That is a definitional split, not a detector failure.
+
+§11 draws in the `Figures.ipynb` house style and verifies the PDF by inflating its streams.
+
+### Licensing
+
+**The one notebook that sends reference text to a third party.** The full-grid run transmits all
+1000 TIMIT references to the OpenAI API — a deliberate choice, recorded under `licensing` in
+`run.json` and carried into `provenance.json`. §5 is gated behind `CONFIRM = True`. §6's
+`DELETE_REMOTE = True` removes the run's input/output files from OpenAI once the Drive copies verify.
+Nothing prints text: output and errors are counted, batch rejections print codes and line numbers
+only.
+
+### Cost
+
+$0.20/1M input, $1.20/1M output, halved by the Batch API. The instruction block is **654 tokens**
+(`o200k_base`); the user turn measured over the 12 000 locally available `base` rows averages
+**28 tokens** (p99 43); chat framing and schema add ~30 (estimated). §4 measures the user turn over
+every row rather than one example.
 
 | reasoning tokens / row | batch-discounted total |
 |---|---|
-| 0 (`effort="none"`) | **$1.48** |
-| 50 | $2.08 |
-| 200 | $3.88 |
-| 500 | $7.48 |
-| 1000 | $13.48 |
+| 0 (`effort="none"`) | **$1.57** |
+| 50 | $2.17 |
+| 200 | $3.97 |
+| 500 | $7.57 |
+| 1000 | $13.57 |
 
-Section 4 prints that sweep rather than a point estimate, deliberately: **there is no measured
-reasoning-token figure for this prompt at `low`/`medium`/`high`**, and inventing one would be worse
-than showing the shape. Section 6 prints the observed per-row figure after a run, which replaces the
-sweep with fact — and at `effort="none"` it *asserts* fewer than 5 per row, because a silently
-ignored parameter still produces a successful run, just several times more expensive.
+It is a sweep, not a prediction — there is no measured reasoning figure for this prompt above `none`.
+§7 prints observed reasoning tokens and the realised cost. Input is bounded: every hypothesis at
+Whisper's 224-token ceiling would add roughly $0.20. The prompt is below OpenAI's **1024-token**
+automatic-caching bar and deliberately not padded past it. Their App. A.4.1 rate card quotes the
+*cached* input rate. **A subscription does not cover API usage** (Claude.ai, ChatGPT, or Claude Code
+with `ANTHROPIC_API_KEY` set all bill API calls separately).
 
-The 654-token prompt is below OpenAI's automatic-caching bar of **1024 tokens**, so it does not
-cache — and is deliberately not padded to clear it, since the saving is a fraction of a dollar and
-padding would mean no longer running the paper's prompt.
+### Batch API specifics that are easy to get wrong
 
-Worth knowing while reading their paper: their App. A.4.1 rate card quotes "$0.075 per million
-input tokens", the **cached** rate, alongside "with most input tokens cached" — so their
-$78-per-million-segments figure assumes a near-perfect hit rate.
+- It takes an uploaded JSONL file (`purpose="batch"`), one call per line with `custom_id`, `method`,
+  `url`, `body`; ceilings 50 000 requests / 200 MB. 20 000 rows ≈ 66 MB, so `CHUNK = 10000`.
+- **Failed requests are not in the output file** — they go to `error_file_id`.
+- **Results are not in submission order** — key on `custom_id` (`r<i>`, `i` indexes `index.csv`).
+- **Expired/cancelled batches still return completed results** (and bill them); download them and let
+  §5 resubmit the rest.
 
-**A subscription does not cover this.** Claude.ai and ChatGPT subscriptions bill separately from
-API usage; programmatic calls draw on API credits regardless of any plan. With `ANTHROPIC_API_KEY`
-set, even Claude Code bills at API rates and ignores the subscription entirely.
-
-### OpenAI Batch API specifics that are easy to get wrong
-
-- **It takes a JSONL file, not a request list.** One line per call with `custom_id`, `method`,
-  `url`, and `body`; uploaded via `client.files.create(..., purpose="batch")`, then referenced by
-  id. Ceilings are 50 000 requests and 200 MB per batch — 20 000 rows is roughly 66 MB, so
-  `CHUNK = 10000` stays inside both and gives two resume points.
-- **Failed requests are not in the output file.** They go to a separate `error_file_id`, so a batch
-  that silently dropped rows still yields a clean-looking output. Both files are read and the row
-  count asserted.
-- **Results are not in submission order** — everything keys off `custom_id`, which is the row's
-  index into the digest-verified `full`.
-- Batch ids are persisted to `llm_batches.json` before the next chunk is submitted, so a
-  disconnected runtime costs nothing and re-running section 5 submits only what is missing.
+The notebook has been exercised end-to-end only against a **mocked** OpenAI client with synthetic
+text (crash-and-adopt, partial failure and retry, config drift, analysis with network blocked and
+`openai` unimportable, no text in printed output or git-safe files) — never against the live API.
 
 ## Publication figures
 

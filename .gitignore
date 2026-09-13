@@ -59,6 +59,8 @@ expc_results_full.csv
 # the hand-labelling sample from Colab_HallucinationTaxonomy.ipynb: carries both
 # reference and hypothesis text
 halluc_label_sample.csv
+# Colab_LLMVerdict.ipynb run folders: requests_*.jsonl carry TIMIT reference text
+llm_runs/
 
 # --- frozen corpus copy (TIMIT audio + transcripts: LDC93S1, not redistributable) ---
 corpus_frozen/
