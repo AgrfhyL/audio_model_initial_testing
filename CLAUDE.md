@@ -434,6 +434,12 @@ i.e. repeated phrases"). The project follows Jasiński et al.
   whitespace-normalized diff; the only residual differences are one space each (`-Phonetic`,
   `Task:Classify`), consistent with PDF extraction. Re-run that diff after any edit to either prompt.
 
+§2 verifies the rebuilt references against **`corpus.reference_digest_sha256`** in
+`delta_provenance.json` — that exact key, which is what `Colab_DeltaSweep.ipynb` writes. An earlier
+version scanned for a key named `reference_digest`, never found it, and failed on Colab with "reference
+digest mismatch (or absent)" even when the references were correct; absent and mismatched now fail
+with separate messages, and a mismatch prints both digest prefixes (digests, not text).
+
 `halluc_taxonomy.csv` is **optional**. §7 derives speaker and region from the TIMIT path
 (`DR4/FADG0/SX289.WAV`); agreement, the per-category table and the taxonomy series in the figure
 appear only when the file is on Drive.
