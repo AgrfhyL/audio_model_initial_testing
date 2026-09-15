@@ -487,7 +487,8 @@ endpoint. `max_tokens` is recorded per batch instead, so a truncation retry at a
 allowed.
 
 `ANALYSE` in §7 lists run folders to analyse together; HER, agreement pairs, the per-category table
-and the figure all extend to every listed run, so two effort levels compare with no API call.
+and the figure all extend to every listed run, so two effort levels compare with no API call. It
+defaults to the delta-sweep run (`RUN_DELTA`) whatever `SOURCE` is set to.
 
 ### Never paying twice
 
@@ -534,7 +535,34 @@ the taxonomy's `degenerate` rows should mostly agree; disagreement there means t
 as something else (typically Language Error).
 
 §11 writes `llm_halluc_rate.pdf/.png` in the `Figures.ipynb` house style and verifies the PDF by
-inflating its streams.
+inflating its streams. The style lives in one **figure style** cell under §1, shared by §11 and §13,
+with a `finish(fig, stem)` that saves, verifies and downloads. To redraw without the API: §1, its
+helper and style cells, then §7 → §8 → §11 (or §13's two cells).
+
+### Hallucination rate against offset (§13)
+
+The delta sweep decoded only 5 s and 25 s, so a 5–25 s curve needs the scaling sweep's hypotheses
+(`scaling_results_1000.csv`, from `Colab_ModelScaling copy.ipynb`: same 1000 clips, five checkpoints,
+greedy fp16 batch 8). `SOURCE = "scaling"` in §1 makes §2–§6 classify those, into a separate run
+folder `<RUN_DELTA>.offsets`. **Every point of the curve describes the scaling sweep's hypotheses.**
+
+- **Reuse is per row and by judge input.** A scaling-sweep 5 s / 25 s row whose *normalized*
+  hypothesis equals the delta sweep's would send the judge the same bytes, so it takes the delta run's
+  verdict and is not sent; rows that differ are classified. KEYS therefore depends only on the input
+  files, never on the delta run's state, which keeps `index.csv` stable across sessions. `reused.csv`
+  records the reused keys with a digest of each shared judge input. §2 prints the identical-row counts
+  per condition — that table is the free check of whether the two sweeps decoded alike.
+- §5 refuses, **before writing or sending anything**, to start an offset run whose delta run is
+  missing or was classified under a different `CONFIG`. §13 re-checks config equality before
+  stitching, and prints the model snapshot that served each run — the two runs happen at different
+  times, and a snapshot change would sit exactly on the 5/10 s and 20/25 s seams.
+- `REUSE_DELTA_VERDICTS = False` classifies all five offsets in one run (`.offsets-all`) instead: no
+  seam, and the 5 s / 25 s rows are paid for again.
+- §13's first cell writes `verdict_by_offset.csv` into the offset run folder (git-safe: identifiers,
+  label, `halluc`, `from_run`, `response_model`) and prints the rate table; the second draws
+  `llm_halluc_by_offset.pdf/.png` from that file alone. Both need only §1 and its helper/style cells.
+- The analysis sections §7–§12 still work on the 5 s / 25 s grid only; an offset run never appears in
+  `ANALYSE`, and §12's standalone reload ignores it (it has no `verdict_per_utterance.csv`).
 
 ### Licensing
 
