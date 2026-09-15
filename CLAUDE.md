@@ -157,6 +157,17 @@ the local notebooks and matter:
 - **`corpus_digests.json`** (committed, root) carries paths + `sha256_audio` only, no transcript
   text, ordered by the original draw. Colab rebuilds and verifies the corpus from a private TIMIT
   copy rather than receiving licensed data.
+- **`whisper.load_model` is a host-RAM spike, not just a GPU load.** It reads the whole checkpoint
+  into memory to hash it (2.9 GB for `large-v3`) and builds the model on the CPU in fp32 (6.2 GB)
+  before `.to("cuda")`. On a free T4 runtime (~12.7 GB RAM) that crashed `Colab_ModelScaling
+  copy.ipynb` at `large-v3`, after four models of decoding — although the delta sweep and three
+  other notebooks load `large-v3` the same way without trouble, so the margin is thin rather than
+  always exceeded. That notebook now uses `load_on_gpu`: chunked hash, `torch.load(map_location=
+  "cuda")`, modules created under `with torch.device("cuda")`, asserted bit-identical to
+  `whisper.load_model` on `tiny` (every state-dict tensor plus the non-persistent mask and alignment
+  heads) before the sweep. Measured on the same code path locally, peak host memory for a `small`
+  load rose 1.08 GB stock vs 0.13 GB. It also prints host RSS per model and offset, and
+  `malloc_trim`s between models. Reach for the same loader in any other notebook that hits RAM.
 
 Subset size is not free: the effect is tail-driven, so 300 clips understate offset-25 WER by ~31%
 relative (0.2064 vs 0.2981). 700 tracks the full curve within 0.005.
