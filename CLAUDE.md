@@ -649,6 +649,7 @@ a paper. `Figures.ipynb` redraws them as **vector PDF** at ACL column widths (3.
 | figure (`figures/<stem>.pdf`) | source file |
 |---|---|
 | `wer_vs_offset` | `scaling_per_condition.csv` |
+| `wer_by_model` | `scaling_per_condition.csv` (25 s against 5 s per checkpoint) |
 | `delta_by_model` | `delta_per_utterance.csv` (+ `delta_provenance.json` if present) |
 | `encoder_cka` | `encsim_per_utterance.csv` |
 | `cka_by_depth` | `encsim_per_layer.csv` |
