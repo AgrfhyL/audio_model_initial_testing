@@ -667,8 +667,11 @@ before the grid is complete. `load()` caches; call `reload()` after pulling fres
 would otherwise be re-paid on every style tweak.
 
 `finish()` writes the PDF and PNG **and verifies the PDF in the same call**, so one section run on
-its own still proves its own output. Section 10 globs `figures/` rather than tracking writes in a
-global, for the same reason. The verification inflates the Flate streams first: matplotlib
+its own still proves its own output. **Downloads are per figure**: on Colab `finish()` then pulls that
+figure to local disk (formats set by `DOWNLOAD` in §2, default PDF only), and `download("stem")`
+re-fetches one already drawn. `DOWNLOAD` sits in §2 rather than §1 because re-running §1 empties the
+bootstrap cache. Section 10 globs `figures/` rather than tracking writes in a global, for the same
+reason as the in-call check, and zips the set only with `ZIP_ALL = True`. The verification inflates the Flate streams first: matplotlib
 compresses its object streams, so a byte-level grep for `/Type3` or `/FontFile2` passes on every
 file and checks nothing.
 
