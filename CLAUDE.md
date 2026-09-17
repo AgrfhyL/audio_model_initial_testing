@@ -579,6 +579,28 @@ folder `<RUN_DELTA>.offsets`. **Every point of the curve describes the scaling s
 - The analysis sections §7–§12 still work on the 5 s / 25 s grid only; an offset run never appears in
   `ANALYSE`, and §12's standalone reload ignores it (it has no `verdict_per_utterance.csv`).
 
+### Hallucination difference-in-differences (§14)
+
+`Δ^h_m(u, o) = [h(o,on) − h(5,on)] − [h(o,off) − h(5,off)]` per utterance over §13's
+`verdict_by_offset.csv`, for o = 10–25 s: the hallucination counterpart of `delta_m`, reported the same
+way — mean with a speaker-clustered BCa interval (severity), and the hurt / unaffected / helped split
+with a Wilson interval and an exact sign test (prevalence). Needs §1 with its helper and style cells
+only; no key, no API.
+
+- The mean is identically the DiD of §13's rates (asserted in integer counts). The per-utterance form
+  adds pairing, which is what makes the sign split and a clustered interval possible.
+- `speaker_boots` is `bootstrap_ci(d, groups=speaker)` from the delta sweep without its loops: a
+  replicate's mean is its drawn per-speaker sums over drawn counts, and one `(n_boot, K)` `integers`
+  call consumes the generator exactly as n_boot calls of K do. The cell asserts that against the loop
+  on 200 resamples; against the verbatim `bootstrap_ci` at 10 000 it was bit-identical on synthetic
+  data.
+- Flags are recounted from `verdict` under the current `HALLUCINATION_LABELS` and asserted equal to the
+  stored `halluc`, so §13's curve and the DiD cannot silently count different things.
+- Writes `did_per_utterance.csv` (identifiers and integers, git-safe) and `did_summary.json` (per-cell
+  mean, interval, split, input digest) into the offset run folder; the figure cell draws
+  `llm_halluc_did.pdf/.png` from the JSON alone. Panel (b) leaves out the unaffected count on purpose —
+  at 85–99% of clips it flattens every other bar.
+
 ### Licensing
 
 **The one notebook that sends reference text to a third party.** The full-grid run transmits all
